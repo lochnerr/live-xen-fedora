@@ -1,7 +1,8 @@
 #!/bin/sh
-set -e
+set -xe
 
-# create-xen-bootstrap-iso-fedora
+# create-fedora-live-xen-bootstrap
+# create-fedora-disk-minimal-bootstrap
 
 # Script to create a Fedora Live Bootstrap iso with livemedia-creator.
 
@@ -21,92 +22,34 @@ set -e
 
 # Releases 28/29 build on 28.
 
-RELEASE="29"
+RELEASE="30"
 
-if [ -n "$(uname -a | grep ec2.internal || :)" ]; then
-  echo "Running in aws."
-  sudo dnf -y upgrade
-  if [ -b /dev/nvme0n1 ]; then
-    echo "We have an nvme device."
-    if [ -z "$(sudo blkid -p /dev/nvme0n1 || :)" ]; then
-      if [ ! -x /usr/sbin/mkfs.btrfs ]; then
-        echo "Installing btrfs tools."
-        sudo dnf -y install btrfs-progs
-      fi
-      echo "Creating btrfs file system on nvme."
-      sudo mkfs.btrfs /dev/nvme0n1
-      echo "Creating btrfs sub-volumes."
-      sudo mount /dev/nvme0n1 /mnt
-      sudo btrfs sub create /mnt/lib
-      sudo btrfs sub create /mnt/tmp
-      echo "Copying files."
-      sudo cp -a /var/lib /mnt
-      sudo cp -a /var/tmp /mnt
-      sudo umount /mnt
-    fi
-    if [ -z "$(mount | grep /var/lib || :)" ]; then
-      echo "Mounting nvme volumes."
-      sudo mount -o subvol=lib /dev/nvme0n1 /var/lib
-      sudo mount -o subvol=tmp /dev/nvme0n1 /var/tmp
-    fi
-  fi
-fi
+MOCKDIR="fedora-${RELEASE}-x86_64"
 
-if [ -z "$(command -v mock 2> /dev/null)" ]; then
-  echo "Installing mock."
-  sudo dnf -y install mock
-  UNAME="lochnerr"
-  [ -n "$(uname -a | grep ec2.internal || :)" ] && UNAME="fedora"
-  echo "Adding user $UNAME to mock group."
-  sudo usermod -a -G mock $UNAME
-  echo "You must logout and login for group membership to take effect."
-  [ -n "$(uname -a | grep ec2.internal || :)" ] && echo "Reboot now."
-  exit 0
-fi
+PROJECT="Fedora-Bootstrap-Live"
+BUILD="home/build"
+BASE="/var/lib/mock/$MOCKDIR/root"
 
-if [ ! -e $HOME/.config/mock.cfg ]; then
-  echo "Creating default mock config."
-  mkdir -p $HOME/.config
-  cat >$HOME/.config/mock.cfg <<-__EOF__
-	config_opts['rpmbuild_networking'] = True
-	config_opts['hostname'] = 'LiveXen'
-	#config_opts['package_manager'] = 'dnf'
-	#config_opts['http_proxy']  = 'http://192.168.33.88:3128'
-	__EOF__
-fi
-
-if [ ! -d /var/lib/mock/fedora-${RELEASE}-x86_64 ]; then
-  echo "Creating mock environment /var/lib/mock/fedora-${RELEASE}-x86_64."
-  mock -r fedora-${RELEASE}-x86_64 --init
-  mock -r fedora-${RELEASE}-x86_64 --install lorax-lmc-novirt vim-minimal pykickstart spin-kickstarts
-fi
-
-if [ ! -d /var/lib/mock/fedora-${RELEASE}-x86_64/root/home/build ]; then
-  echo "Setting up build directory /home/build in mock environement."
-  mock -r fedora-${RELEASE}-x86_64 --shell --old-chroot <<-EOD
-	mkdir -p /home/build
-	chown 1000:1000 /home/build
-	EOD
-fi
-
-if [ ! -d /var/lib/mock/fedora-${RELEASE}-x86_64/root/usr/share/lorax/templates.d/99-generic ]; then
+if [ ! -d /var/lib/mock/$MOCKDIR/root/usr/share/lorax/templates.d/99-generic ]; then
   echo "Error: Lorax templates not installed in mock environement."
+  echo "Do you need to run 'install-mock-livemedia-creator'?"
   exit 1
 fi
 
 update_lorax_files() {
 
-  mock -r fedora-${RELEASE}-x86_64 --shell --old-chroot <<-EOD
+  mock -r $MOCKDIR --shell --old-chroot <<-EOD
 	# Remove the build lorax templates.
-	rm -rf /home/build/share
+	rm -rf /$BUILD/share
 	# Copy the baseline lorax templates.
-	mkdir -p /home/build/share
-	cp -a /usr/share/lorax /home/build/share
-	chown -R 1000:1000 /home/build/share
+	mkdir -p /$BUILD/share
+	cp -a /usr/share/lorax /$BUILD/share
+	chown -R 1000:1000 /$BUILD/share
 	EOD
 
-# Create the modified templates.
-cat >/var/lib/mock/fedora-${RELEASE}-x86_64/root/home/build/share/lorax/templates.d/99-generic/live/x86.tmpl <<'__EOF__'
+# Create the modified templates in mock.
+  mock -r $MOCKDIR --shell --old-chroot <<-'EOD'
+cat >/home/build/share/lorax/templates.d/99-generic/live/x86.tmpl <<'__EOF__'
 <%page args="kernels, runtime_img, basearch, inroot, outroot, product, isolabel"/>
 <%
 configdir="tmp/config_files/x86"
@@ -242,7 +185,7 @@ runcmd isohybrid ${efihybrid} ${outroot}/images/boot.iso
 treeinfo images-${basearch} boot.iso images/boot.iso
 __EOF__
 
-cat >/var/lib/mock/fedora-${RELEASE}-x86_64/root/home/build/share/lorax/templates.d/99-generic/live/config_files/x86/isolinux.cfg <<__EOF__
+cat >/home/build/share/lorax/templates.d/99-generic/live/config_files/x86/isolinux.cfg <<__EOF__
 default vesamenu.c32
 timeout 600
 
@@ -365,7 +308,7 @@ label returntomain
 menu end
 __EOF__
 
-cat >/var/lib/mock/fedora-${RELEASE}-x86_64/root/home/build/share/lorax/templates.d/99-generic/live/config_files/x86/grub2-efi.cfg <<__EOF__
+cat >/home/build/share/lorax/templates.d/99-generic/live/config_files/x86/grub2-efi.cfg <<__EOF__
 set default="0"
 
 function load_video {
@@ -421,31 +364,43 @@ submenu 'Troubleshooting -->' {
 	}
 }
 __EOF__
+	EOD
 
 }
 
 # Create the build script.
-PROJECT="Fedora-Bootstrap-Live"
-BUILD="/home/build"
-MOCKDIR="fedora-${RELEASE}-x86_64"
-BASE="/var/lib/mock/$MOCKDIR/root"
+
+TYPE="live"
+
+# TODO Disk is WIP.
+#TYPE="disk"
 
 # TODO Make generic path
 # Create the bootstrap.ks file from the startup files.
-./make-bootstrap-ks
+[ "$TYPE" = "live" ] && ./make-bootstrap-ks
+
+mock -r $MOCKDIR --shell --old-chroot <<-EOD
+	mkdir -p /$BUILD
+	chown -R 1000:1000 /$BUILD
+	EOD
 
 # Copy the kickstart files into mock.
-mv -f bootstrap.ks $BASE/$BUILD
-cp -a -f fedora-live-base.ks $BASE/$BUILD
-cp -a fedora-live-workstation.ks $BASE/$BUILD
+if [ "$TYPE" = "live" ]; then
+  mv -f bootstrap.ks $BASE/$BUILD
+  cp -a -f fedora-live-base.ks $BASE/$BUILD
+  cp -a fedora-live-workstation.ks $BASE/$BUILD
+else
+  cp -a -f fedora-disk-minimal.ks $BASE/$BUILD
+  cp -a -f fedora-disk-base.ks $BASE/$BUILD
+  cp -a -f fedora-minimal-common.ks $BASE/$BUILD
+fi
 
-# Flatten the modified workstation kickstart in mock.
+# Set repo.
 mock -r $MOCKDIR --shell --old-chroot <<-EOD
-	cd $BUILD
+	cd /$BUILD
 	cp /usr/share/spin-kickstarts/fedora-repo.ks .
 	cp /usr/share/spin-kickstarts/fedora-repo-rawhide.ks .
 	cp /usr/share/spin-kickstarts/fedora-repo-not-rawhide.ks .
-	cp /usr/share/spin-kickstarts/fedora-workstation-common.ks .
 	if [ -n "\$(grep "# %include fedora-repo-not-rawhide.ks" fedora-repo.ks)" ]; then
 	  echo "Setting repo to not rawhide."
 	  cat >fedora-repo.ks <<-DOE
@@ -456,16 +411,31 @@ mock -r $MOCKDIR --shell --old-chroot <<-EOD
 		%include fedora-repo-not-rawhide.ks
 		DOE
 	fi
-	ksflatten -c fedora-live-workstation.ks -o fedora-live-workstation-flat.ks
 	EOD
 
-# Overwrite the lorax templates with bootstrap versions.
-update_lorax_files
+# Flatten the modified workstation kickstart in mock.
+if [ "$TYPE" = "live" ]; then
+  mock -r $MOCKDIR --shell --old-chroot <<-EOD
+	cd /$BUILD
+	cp /usr/share/spin-kickstarts/fedora-workstation-common.ks .
+	ksflatten -c fedora-live-workstation.ks -o fedora-live-workstation-flat.ks
+	EOD
+else
+  mock -r $MOCKDIR --shell --old-chroot <<-EOD
+	cd /$BUILD
+	ksflatten -c fedora-disk-minimal.ks -o fedora-disk-minimal-flat.ks
+	EOD
+fi
 
-# Do the diffs in mock.
+if [ "$TYPE" = "live" ]; then
+  # Overwrite the lorax templates with bootstrap versions.
+  update_lorax_files
 
-mock -r $MOCKDIR --shell --old-chroot <<-EOD
-	cd $BUILD
+  TARGET="xen-bootstrap-iso-fedora"
+
+  # Do the diffs in mock.
+  mock -r $MOCKDIR --shell --old-chroot <<-EOD
+	cd /$BUILD
 
 	echo >changes.diff
 
@@ -498,18 +468,47 @@ mock -r $MOCKDIR --shell --old-chroot <<-EOD
 	rm -f fedora-workstation-common.ks
 	chown 1000:1000 changes.diff
 	EOD
+else
 
-mv $BASE/$BUILD/changes.diff xen-bootstrap-iso-fedora.diff
+  TARGET="disk-minimal-fedora"
+
+  # Do the diffs in mock.
+  mock -r $MOCKDIR --shell --old-chroot <<-EOD
+	cd /$BUILD
+
+	echo >changes.diff
+
+	echo "fedora-disk-minimal.ks:" >>changes.diff
+	diff /usr/share/spin-kickstarts/fedora-disk-minimal.ks fedora-disk-minimal.ks >>changes.diff || true
+	echo >>changes.diff
+
+	echo "fedora-disk-base.ks:" >>changes.diff
+	diff /usr/share/spin-kickstarts/fedora-disk-base.ks fedora-disk-base.ks >>changes.diff || true
+	echo >>changes.diff
+
+	echo "fedora-minimal-common.ks:" >>changes.diff
+	diff /usr/share/spin-kickstarts/fedora-minimal-common.ks fedora-minimal-common.ks >>changes.diff || true
+	echo >>changes.diff
+
+	# Clean your room.
+	## THIS WON'T WORK (kills -flat.ks): rm -f *.ks
+	chown 1000:1000 changes.diff
+	EOD
+fi
+
+mv $BASE/$BUILD/changes.diff $TARGET.diff
 
 #--title TITLE            Substituted for @TITLE@ in bootloader config files
 #--project PROJECT        substituted for @PROJECT@ in bootloader config files
 #--releasever RELEASEVER  substituted for @VERSION@ in bootloader config files
 
-# Script to be executed by mock.
-cat >$BASE/$BUILD/build-iso <<-__EOF__
+if [ "$TYPE" = "live" ]; then
+  mock -r $MOCKDIR --shell --old-chroot <<-EOX
+# Create build script to be executed by mock.
+cat >/$BUILD/build.sh <<-__EOF__
 	#!/bin/sh
 
-	cd $BUILD
+	cd /$BUILD
 
 	rm -rf tmp
 	rm -rf lmc
@@ -574,14 +573,68 @@ cat >$BASE/$BUILD/build-iso <<-__EOF__
 
 	__EOF__
 
-# Make the build script executable.
-chmod +x $BASE/$BUILD/build-iso
+	# Make the build script executable.
+	chmod +x /$BUILD/build.sh
+	EOX
+else
+  mock -r $MOCKDIR --shell --old-chroot <<-EOX
+# Create build script to be executed by mock.
+cat >/$BUILD/build.sh <<-__EOF__
+	#!/bin/sh
+	set -xe
+
+	cd /$BUILD
+
+	rm -rf tmp
+	rm -rf lmc
+	rm -rf image
+	rm -rf logs
+	mkdir -p tmp
+	mkdir -p logs/image
+	mkdir -p logs/iso
+
+	# Create the live disk image.
+	livemedia-creator --ks fedora-disk-minimal-flat.ks \
+	  --no-virt \
+	  --lorax-templates=./share/lorax/templates.d/99-generic/ \
+	  --logfile=./logs/image/image.log \
+	  --resultdir=./image \
+	  --make-fsimage \
+	  --image-name=minimal.img \
+	  --fs-label=minimal \
+	  --tmp=./tmp || exit 1
+
+	# Make updates to image.
+
+	#rm -rf mnt
+	#mkdir mnt
+	#mount ./image/minimal.img ./mnt
+
+	# Reset default target to multi-user.  Use 'systemctl isolate graphical.target' to enable gui.
+	##rm -f ./mnt/etc/systemd/system/default.target
+	##ln -s /lib/systemd/system/multi-user.target ./mnt/etc/systemd/system/default.target
+
+	#umount ./mnt
+	#sleep 1s
+	#rmdir ./mnt
+
+	chown -R 1000:1000 ./lmc
+	chown -R 1000:1000 ./logs
+
+	rm -rf tmp
+
+	__EOF__
+
+	# Make the build script executable.
+	chmod +x /$BUILD/build.sh
+	EOX
+fi
 
 if [ "$1" != "diff" ]; then
 
-  # Run it in mock environment.
+  # Run build in mock environment.
   time mock -r $MOCKDIR --shell --old-chroot \
-    $BUILD/build-iso
+    /$BUILD/build.sh
 
   # Get the iso image from the mock environment.
   mv -f $BASE/$BUILD/lmc/*.iso .
