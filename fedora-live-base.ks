@@ -18,8 +18,7 @@ zerombr
 clearpart --all
 services --enabled=NetworkManager,ModemManager,sshd --disabled=xendomains
 network --bootproto=dhcp --device=link --activate
-rootpw --iscrypted $6$hwYY11mwR4wCv9d2$QTsy5s0Ldi78KHLIKzsTPbnNzDvsN0ZVUdsWrETakMDWQz0T3Ss4eemYr4oJlgq0sCH5qmsdPG221/6neIJy3/
-user --name=admin --password=$6$FYfPlorVVslRxJjF$APNTptdc1XeGCbn3nsbc5kcUc4FIho46ZhJ.cdRHJd20GdybGy1MCjP77tpcEdbJfTw0cy4LUfiysgQFJdekA1 --iscrypted --gecos="System Administrator"
+rootpw --lock --iscrypted locked
 shutdown
 
 %include fedora-repo.ks

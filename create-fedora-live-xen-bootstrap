@@ -1,5 +1,5 @@
 #!/bin/sh
-set -xe
+set -e
 
 # create-fedora-live-xen-bootstrap
 # create-fedora-disk-minimal-bootstrap
@@ -36,6 +36,11 @@ BASE="/var/lib/mock/$MOCKDIR/root"
 if [ ! -d /var/lib/mock/$MOCKDIR/root/usr/share/lorax/templates.d/99-generic ]; then
   echo "Error: Lorax templates not installed in mock environement."
   echo "Do you need to run 'install-mock-livemedia-creator'?"
+  exit 1
+fi
+
+if [ -z "$USER_PW" ]; then
+  echo "Error: USER_PW environment variable not set!"
   exit 1
 fi
 
@@ -420,6 +425,9 @@ if [ "$TYPE" = "live" ]; then
 	cd /$BUILD
 	cp /usr/share/spin-kickstarts/fedora-workstation-common.ks .
 	ksflatten -c fedora-live-workstation.ks -o fedora-live-workstation-flat.ks
+	[ -n '$ROOT_PW' ] && sed -i 's:^rootpw.*:rootpw --iscrypted ${ROOT_PW}:' fedora-live-workstation-flat.ks
+	[ -n '$USER_PW' ] && sed -i '/^rootpw.*/a \
+	user --name=admin --password=$USER_PW --iscrypted --gecos="System Administrator"' fedora-live-workstation-flat.ks
 	EOD
 else
   mock -r $MOCKDIR --shell --old-chroot <<-EOD
@@ -459,6 +467,10 @@ if [ "$TYPE" = "live" ]; then
 	echo "grub2-efi.cfg:" >>changes.diff
 	diff /usr/share/lorax/templates.d/99-generic/live/config_files/x86/grub2-efi.cfg share/lorax/templates.d/99-generic/live/config_files/x86/grub2-efi.cfg >>changes.diff || :
 	echo >>changes.diff
+
+	#echo "fedora-live-workstation-flat.ks:" >>changes.diff
+	#echo "" >>changes.diff
+	#cat fedora-live-workstation-flat.ks >>changes.diff
 
 	# Clean your room.
 	rm -f bootstrap.ks
