@@ -20,9 +20,12 @@ set -xe
 # 28 2018-05-01 4.16
 # 29 2018-10-23 4.??
 
-# Releases 28/29 build on 28.
+# 31 2019-11-21 5.3.12
 
-RELEASE="30"
+# Releases 28/29 build on 28.
+# Release 31 builds on 30.
+
+RELEASE="31"
 
 MOCKDIR="fedora-${RELEASE}-x86_64"
 
@@ -50,7 +53,7 @@ update_lorax_files() {
 # Create the modified templates in mock.
   mock -r $MOCKDIR --shell --old-chroot <<-'EOD'
 cat >/home/build/share/lorax/templates.d/99-generic/live/x86.tmpl <<'__EOF__'
-<%page args="kernels, runtime_img, basearch, inroot, outroot, product, isolabel"/>
+<%page args="kernels, runtime_img, basearch, inroot, outroot, product, isolabel, extra_boot_args"/>
 <%
 configdir="tmp/config_files/x86"
 SYSLINUXDIR="usr/share/syslinux"
@@ -66,17 +69,15 @@ def valid_label(ch):
 
 isolabel = ''.join(ch if valid_label(ch) else '-' for ch in isolabel)
 
+import os
 from os.path import basename
-%>
+from pylorax.sysutils import joinpaths
 
-## Test ${runtime_img} to see if udf is needed
-<%
-    import os
-    from pylorax.sysutils import joinpaths
-    if os.stat(joinpaths(inroot, runtime_img)).st_size >= 4*1024**3:
-        udfargs = "-allow-limited-size"
-    else:
-        udfargs = ""
+# Test the runtime_img, if it is > 4GiB we need to set -iso-level to 3
+if os.stat(joinpaths(inroot, runtime_img)).st_size >= 4*1024**3:
+    isoargs = "-iso-level 3"
+else:
+    isoargs = ""
 %>
 
 mkdir ${LIVEDIR}
@@ -102,6 +103,7 @@ install boot/memtest* ${BOOTDIR}/memtest
 replace @VERSION@ ${product.version} ${BOOTDIR}/grub.conf ${BOOTDIR}/isolinux.cfg ${BOOTDIR}/*.msg
 replace @PRODUCT@ '${product.name}'  ${BOOTDIR}/grub.conf ${BOOTDIR}/isolinux.cfg ${BOOTDIR}/*.msg
 replace @ROOT@ 'root=live:CDLABEL=${isolabel|udev}' ${BOOTDIR}/isolinux.cfg
+replace @EXTRA@ '${extra_boot_args}' ${BOOTDIR}/isolinux.cfg
 
 ## install kernels
 mkdir ${KERNELDIR}
@@ -123,7 +125,7 @@ hardlink ${KERNELDIR}/initrd.img ${BOOTDIR}
 %endif
 
 ## WHeeeeeeee, EFI.
-<% efiargs=""; efigraft=""; efihybrid=""; efiarch32=None; efiarch64=None %>
+<% efiargs=""; efigraft=""; efiarch32=None; efiarch64=None %>
 %if exists("boot/efi/EFI/*/gcdia32.efi"):
     <% efiarch32 = 'IA32' %>
 %endif
@@ -133,19 +135,18 @@ hardlink ${KERNELDIR}/initrd.img ${BOOTDIR}
 %if (efiarch32 or efiarch64) and basearch != 'i386':
     <%
     efigraft="EFI/BOOT={0}/EFI/BOOT".format(outroot)
-    images = ["images/efiboot.img"]
+    images = [("images/efiboot.img", "-isohybrid-gpt-basdat")]
     if domacboot:
-        images.append("images/macboot.img")
+        images.append(("images/macboot.img", "-isohybrid-gpt-hfsplus"))
     %>
-    %for img in images:
+    %for img, hybrid in images:
         <%
-        efiargs += " -eltorito-alt-boot -e {0} -no-emul-boot".format(img)
+        efiargs += " -eltorito-alt-boot -e {0} -no-emul-boot {1}".format(img, hybrid)
         efigraft += " {0}={1}/{0}".format(img,outroot)
         %>
         treeinfo images-${basearch} ${img|basename} ${img}
     %endfor
-    <% efihybrid = "--uefi --mac" if domacboot else "--uefi" %>
-    <%include file="efi.tmpl" args="configdir=configdir, KERNELDIR=KERNELDIR, efiarch32=efiarch32, efiarch64=efiarch64, isolabel=isolabel"/>
+    <%include file="efi.tmpl" args="configdir=configdir, KERNELDIR=KERNELDIR, efiarch32=efiarch32, efiarch64=efiarch64, isolabel=isolabel, extra_boot_args=extra_boot_args"/>
 %endif
 
 # Create optional product.img and updates.img
@@ -172,16 +173,16 @@ mkdir EFI/BOOT/x86_64-efi
 install usr/lib/grub/x86_64-efi/* EFI/BOOT/x86_64-efi
 
 ## make boot.iso
-runcmd mkisofs -o ${outroot}/images/boot.iso \
+runcmd xorrisofs ${isoargs} -o ${outroot}/images/boot.iso \
+       -isohybrid-mbr /usr/share/syslinux/isohdpfx.bin \
        -b ${BOOTDIR}/isolinux.bin -c ${BOOTDIR}/boot.cat \
        -boot-load-size 4 -boot-info-table -no-emul-boot \
-       ${efiargs} -R -J -V '${isolabel}' -T ${udfargs} \
+       ${efiargs} -R -J -V '${isolabel}' \
        -graft-points \
        ${BOOTDIR}=${outroot}/${BOOTDIR} \
        ${KERNELDIR}=${outroot}/${KERNELDIR} \
        ${LIVEDIR}=${outroot}/${LIVEDIR} \
        ${efigraft} ${filegraft}
-runcmd isohybrid ${efihybrid} ${outroot}/images/boot.iso
 treeinfo images-${basearch} boot.iso images/boot.iso
 __EOF__
 
@@ -250,22 +251,22 @@ label xen
   menu label Start @PRODUCT@ @VERSION@ with ^Xen hypervisor
   menu default
   kernel mboot.c32
-  append xen.gz dom0_mem=4096M,max:8192M dom0_max_vcpus=2 dom0_vcpus_pin=true loglvl=all guest_loglvl=all iommu=on,verbose msi=1 conring_size=4M com1=115200,8n1 console=com1,vga --- vmlinuz initrd=initrd.img @ROOT@ rd.live.image xencons=hvc console=hvc0 console=tty0 --- initrd.img
+  append xen.gz dom0_mem=4096M,max:8192M dom0_max_vcpus=2 dom0_vcpus_pin=true loglvl=all guest_loglvl=all iommu=on,verbose msi=1 conring_size=4M com1=115200,8n1 console=com1,vga --- vmlinuz initrd=initrd.img @ROOT@ @EXTRA@ rd.live.image xencons=hvc console=hvc0 console=tty0 --- initrd.img
 
 label linux
   menu label ^Start @PRODUCT@ @VERSION@
   kernel vmlinuz
-  append initrd=initrd.img @ROOT@ rd.live.image
+  append initrd=initrd.img @ROOT@ @EXTRA@ rd.live.image
 
 label checkxen
   menu label Test this media & start @PRODUCT@ @VERSION@ with Xen hypervisor
   kernel mboot.c32
-  append xen.gz dom0_mem=4096M,max:8192M dom0_max_vcpus=2 dom0_vcpus_pin=true loglvl=all guest_loglvl=all iommu=on,verbose msi=1 conring_size=4M com1=115200,8n1 console=com1,vga --- vmlinuz initrd=initrd.img @ROOT@ rd.live.image xencons=hvc console=hvc0 console=tty0 rd.live.check --- initrd.img
+  append xen.gz dom0_mem=4096M,max:8192M dom0_max_vcpus=2 dom0_vcpus_pin=true loglvl=all guest_loglvl=all iommu=on,verbose msi=1 conring_size=4M com1=115200,8n1 console=com1,vga --- vmlinuz initrd=initrd.img @ROOT@ @EXTRA@ rd.live.image xencons=hvc console=hvc0 console=tty0 rd.live.check --- initrd.img
 
 label check
   menu label Test this ^media & start @PRODUCT@ @VERSION@
   kernel vmlinuz
-  append initrd=initrd.img @ROOT@ rd.live.image rd.live.check
+  append initrd=initrd.img @ROOT@ @EXTRA@ rd.live.image rd.live.check
 
 menu separator # insert an empty line
 
@@ -281,7 +282,7 @@ label vesa
 	@PRODUCT@ @VERSION@.
   endtext
   kernel vmlinuz
-  append initrd=initrd.img @ROOT@ rd.live.image nomodeset
+  append initrd=initrd.img @ROOT@ @EXTRA@ rd.live.image nomodeset
 
 label memtest
   menu label Run a ^memory test
@@ -336,31 +337,31 @@ menuentry 'Start @PRODUCT@ @VERSION@ with Xen hypervisor' --class fedora --class
         echo    'Loading Xen ...'
         multiboot2 /isolinux/xen.gz dom0_mem=4096M,max:8192M dom0_max_vcpus=2 dom0_vcpus_pin=true loglvl=all guest_loglvl=all iommu=on,verbose msi=1 conring_size=4M com1=115200,8n1 console=com1,vga
         echo    'Loading Linux ...'
-        module2  @KERNELPATH@ @ROOT@ rd.live.image ignore_loglevel intel_iommu=igfx_off log_buf_len=128M console=hvc0
+        module2  @KERNELPATH@ @ROOT@ @EXTRA@ rd.live.image ignore_loglevel intel_iommu=igfx_off log_buf_len=128M console=hvc0
         echo    'Loading initial ramdisk ...'
         module2  @INITRDPATH@
 }
 menuentry 'Start @PRODUCT@ @VERSION@' --class fedora --class gnu-linux --class gnu --class os {
-	linuxefi @KERNELPATH@ @ROOT@ rd.live.image
-	initrdefi @INITRDPATH@
+        linuxefi @KERNELPATH@ @ROOT@ @EXTRA@ rd.live.image
+        initrdefi @INITRDPATH@
 }
 menuentry 'Test this media & start @PRODUCT@ @VERSION@ with Xen hypervisor' --class fedora --class gnu-linux --class gnu --class os --class xen {
         insmod multiboot2
         echo    'Loading Xen ...'
         multiboot2 /isolinux/xen.gz dom0_mem=4096M,max:8192M dom0_max_vcpus=2 dom0_vcpus_pin=true loglvl=all guest_loglvl=all iommu=on,verbose msi=1 conring_size=4M com1=115200,8n1 console=com1,vga
         echo    'Loading Linux ...'
-        module2  @KERNELPATH@ @ROOT@ rd.live.image ignore_loglevel intel_iommu=igfx_off log_buf_len=128M console=hvc0 rd.live.check
+        module2  @KERNELPATH@ @ROOT@ @EXTRA@ rd.live.image ignore_loglevel intel_iommu=igfx_off log_buf_len=128M console=hvc0 rd.live.check
         echo    'Loading initial ramdisk ...'
         module2  @INITRDPATH@
 }
 menuentry 'Test this media & start @PRODUCT@ @VERSION@' --class fedora --class gnu-linux --class gnu --class os {
-	linuxefi @KERNELPATH@ @ROOT@ rd.live.image rd.live.check
-	initrdefi @INITRDPATH@
+        linuxefi @KERNELPATH@ @ROOT@ @EXTRA@ rd.live.image rd.live.check
+        initrdefi @INITRDPATH@
 }
 submenu 'Troubleshooting -->' {
 	menuentry 'Start @PRODUCT@ @VERSION@ in basic graphics mode' --class fedora --class gnu-linux --class gnu --class os {
-		linuxefi @KERNELPATH@ @ROOT@ rd.live.image nomodeset
-		initrdefi @INITRDPATH@
+                linuxefi @KERNELPATH@ @ROOT@ @EXTRA@ rd.live.image nomodeset
+                initrdefi @INITRDPATH@
 	}
 }
 __EOF__
@@ -527,6 +528,7 @@ cat >/$BUILD/build.sh <<-__EOF__
 	  --make-fsimage \
 	  --image-name=livexen.img \
 	  --fs-label=LiveXen \
+	  --releasever=${RELEASE} \
 	  --tmp=./tmp || exit 1
 
 	# Make updates to image.
