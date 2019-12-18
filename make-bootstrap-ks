@@ -1,0 +1,54 @@
+#!/bin/sh
+set -e
+
+STARTUP="$HOME/startup"
+[ -d "/home/lochnerr/startup" ] && STARTUP="/home/lochnerr/startup"
+[ -d "../startup" ] && STARTUP="../startup"
+[ -d "bootstrap" ] && STARTUP="bootstrap"
+echo "Startup dir is: $STARTUP."
+
+echo "" >bootstrap.ks
+
+echo "cat >b64 <<-'__EOD__'" >>bootstrap.ks
+cat $STARTUP/bootstrap.service | base64 >>bootstrap.ks
+cat >>bootstrap.ks <<-'__EOF__'
+	__EOD__
+
+	/usr/bin/cat b64 | /usr/bin/base64 -d > bootstrap.service
+
+	__EOF__
+
+echo "cat >b64 <<-'__EOD__'" >>bootstrap.ks
+cat $STARTUP/bin/bootstrap-shutdown | base64 >>bootstrap.ks
+cat >>bootstrap.ks <<-'__EOF__'
+	__EOD__
+
+	/usr/bin/cat b64 | /usr/bin/base64 -d > bootstrap-shutdown
+
+	__EOF__
+
+echo "cat >b64 <<-'__EOD__'" >>bootstrap.ks
+cat $STARTUP/bin/bootstrap-startup | base64 >>bootstrap.ks
+cat >>bootstrap.ks <<-'__EOF__'
+	__EOD__
+
+	/usr/bin/cat b64 | /usr/bin/base64 -d > bootstrap-startup
+	/usr/bin/rm b64
+
+	/usr/bin/chmod 0644  bootstrap.service
+	/usr/bin/chmod 0755  bootstrap-shutdown
+	/usr/bin/chmod 0755  bootstrap-startup
+
+	/usr/bin/mv bootstrap.service  /usr/lib/systemd/system/
+	/usr/bin/mv bootstrap-shutdown /usr/local/bin/
+	/usr/bin/mv bootstrap-startup  /usr/local/bin/
+
+	/usr/sbin/restorecon  /usr/lib/systemd/system/bootstrap.service
+	/usr/sbin/restorecon  /usr/local/bin/bootstrap-shutdown
+	/usr/sbin/restorecon  /usr/local/bin/bootstrap-startup
+
+	# Enable the bootstrap service now!
+	/usr/bin/systemctl enable bootstrap.service || :
+
+	__EOF__
+
