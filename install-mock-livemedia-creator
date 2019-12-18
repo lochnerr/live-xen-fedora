@@ -1,0 +1,80 @@
+#!/bin/sh
+set -e
+
+# install-mock-livemedia-creator
+
+# Script to install mock with livemedia-creator.
+
+RELEASE="31"
+
+MOCKDIR="fedora-${RELEASE}-x86_64"
+BUILD="home/build"
+
+if [ -n "$(uname -a | grep ec2.internal || :)" ]; then
+  echo "Running in aws."
+  sudo dnf -y upgrade
+  if [ -b /dev/nvme0n1 ]; then
+    echo "We have an nvme device."
+    if [ -z "$(sudo blkid -p /dev/nvme0n1 || :)" ]; then
+      if [ ! -x /usr/sbin/mkfs.btrfs ]; then
+        echo "Installing btrfs tools."
+        sudo dnf -y install btrfs-progs
+      fi
+      echo "Creating btrfs file system on nvme."
+      sudo mkfs.btrfs /dev/nvme0n1
+      echo "Creating btrfs sub-volumes."
+      sudo mount /dev/nvme0n1 /mnt
+      sudo btrfs sub create /mnt/lib
+      sudo btrfs sub create /mnt/tmp
+      echo "Copying files."
+      sudo cp -a /var/lib /mnt
+      sudo cp -a /var/tmp /mnt
+      sudo umount /mnt
+    fi
+    if [ -z "$(mount | grep /var/lib || :)" ]; then
+      echo "Mounting nvme volumes."
+      sudo mount -o subvol=lib /dev/nvme0n1 /var/lib
+      sudo mount -o subvol=tmp /dev/nvme0n1 /var/tmp
+    fi
+  fi
+fi
+
+if [ -z "$(command -v mock 2> /dev/null)" ]; then
+  echo "Installing mock."
+  sudo dnf -y install mock
+  UNAME="lochnerr"
+  [ -n "$(uname -a | grep ec2.internal || :)" ] && UNAME="fedora"
+  echo "Adding user $UNAME to mock group."
+  sudo usermod -a -G mock $UNAME
+  echo "You must logout and login for group membership to take effect."
+  [ -n "$(uname -a | grep ec2.internal || :)" ] && echo "Reboot now."
+  exit 0
+fi
+
+if [ ! -e $HOME/.config/mock.cfg ]; then
+  echo "Creating default mock config."
+  mkdir -p $HOME/.config
+  cat >$HOME/.config/mock.cfg <<-__EOF__
+	config_opts['rpmbuild_networking'] = True
+	config_opts['hostname'] = 'LiveXen'
+	#config_opts['package_manager'] = 'dnf'
+	#config_opts['http_proxy']  = 'http://192.168.33.88:3128'
+	__EOF__
+fi
+
+if [ ! -d /var/lib/mock/$MOCKDIR ]; then
+  echo "Creating mock environment /var/lib/mock/$MOCKDIR."
+  mock -r $MOCKDIR --init
+  mock -r $MOCKDIR --install lorax-lmc-novirt vim-minimal pykickstart spin-kickstarts lorax-templates-generic anaconda
+fi
+
+if [ ! -d /var/lib/mock/$MOCKDIR/root/$BUILD ]; then
+  echo "Setting up build directory /$BUILD in mock environement."
+  mock -r $MOCKDIR --shell --old-chroot <<-EOD
+	mkdir -p /$BUILD
+	chown 1000:1000 /$BUILD
+	EOD
+fi
+
+echo "Done!"
+
