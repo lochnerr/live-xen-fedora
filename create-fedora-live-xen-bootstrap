@@ -13,6 +13,14 @@ set -e
 # See: https://fedoraproject.org/wiki/Livemedia-creator-_How_to_create_and_use_a_Live_CD
 #   for information on how to setup livemedia-creator with mock and lorax.
 
+# Releases:
+# 26 2017-07-11 4.11 2018-05-29
+# 27 2017-11-14 4.13
+# 28 2018-05-01 4.16
+# 29 2018-10-23 4.??
+
+# Releases 28/29 build on 28.
+
 RELEASE="29"
 
 if [ -n "$(uname -a | grep ec2.internal || :)" ]; then
@@ -47,10 +55,24 @@ fi
 if [ -z "$(command -v mock 2> /dev/null)" ]; then
   echo "Installing mock."
   sudo dnf -y install mock
-  sudo usermod -a -G mock fedora
+  UNAME="lochnerr"
+  [ -n "$(uname -a | grep ec2.internal || :)" ] && UNAME="fedora"
+  echo "Adding user $UNAME to mock group."
+  sudo usermod -a -G mock $UNAME
   echo "You must logout and login for group membership to take effect."
   [ -n "$(uname -a | grep ec2.internal || :)" ] && echo "Reboot now."
   exit 0
+fi
+
+if [ ! -e $HOME/.config/mock.cfg ]; then
+  echo "Creating default mock config."
+  mkdir -p $HOME/.config
+  cat >$HOME/.config/mock.cfg <<-__EOF__
+	config_opts['rpmbuild_networking'] = True
+	config_opts['hostname'] = 'LiveXen'
+	#config_opts['package_manager'] = 'dnf'
+	#config_opts['http_proxy']  = 'http://192.168.33.88:3128'
+	__EOF__
 fi
 
 if [ ! -d /var/lib/mock/fedora-${RELEASE}-x86_64 ]; then
@@ -61,8 +83,10 @@ fi
 
 if [ ! -d /var/lib/mock/fedora-${RELEASE}-x86_64/root/home/build ]; then
   echo "Setting up build directory /home/build in mock environement."
-  sudo mkdir -p /var/lib/mock/fedora-${RELEASE}-x86_64/root/home/build
-  sudo chown 1000:1000 /var/lib/mock/fedora-${RELEASE}-x86_64/root/home/build
+  mock -r fedora-${RELEASE}-x86_64 --shell --old-chroot <<-EOD
+	mkdir -p /home/build
+	chown 1000:1000 /home/build
+	EOD
 fi
 
 if [ ! -d /var/lib/mock/fedora-${RELEASE}-x86_64/root/usr/share/lorax/templates.d/99-generic ]; then
@@ -70,29 +94,19 @@ if [ ! -d /var/lib/mock/fedora-${RELEASE}-x86_64/root/usr/share/lorax/templates.
   exit 1
 fi
 
-if [ ! -e $HOME/.config/mock.cfg ]; then
-  echo "Creating defaul mock config."
-  mkdir -p $HOME/.config
-  cat >$HOME/.config/mock.cfg <<-__EOF__
-	config_opts['rpmbuild_networking'] = True
-	config_opts['hostname'] = 'LiveXen'
-	#config_opts['package_manager'] = 'dnf'
-	#config_opts['http_proxy']  = 'http://192.168.33.88:3128'
-	__EOF__
-fi
-
 update_lorax_files() {
 
-# Remove the working lorax templates.
-rm -rf /var/lib/mock/fedora-${RELEASE}-x86_64/root/home/build/share
-
-# Copy the baseline lorax templates.
-mkdir -p /var/lib/mock/fedora-${RELEASE}-x86_64/root/home/build/share
-cp -a /var/lib/mock/fedora-${RELEASE}-x86_64/root/usr/share/lorax \
-      /var/lib/mock/fedora-${RELEASE}-x86_64/root/home/build/share
+  mock -r fedora-${RELEASE}-x86_64 --shell --old-chroot <<-EOD
+	# Remove the build lorax templates.
+	rm -rf /home/build/share
+	# Copy the baseline lorax templates.
+	mkdir -p /home/build/share
+	cp -a /usr/share/lorax /home/build/share
+	chown -R 1000:1000 /home/build/share
+	EOD
 
 # Create the modified templates.
-cat <<'__EOF__' | sudo tee >/dev/null /var/lib/mock/fedora-${RELEASE}-x86_64/root/home/build/share/lorax/templates.d/99-generic/live/x86.tmpl 
+cat >/var/lib/mock/fedora-${RELEASE}-x86_64/root/home/build/share/lorax/templates.d/99-generic/live/x86.tmpl <<'__EOF__'
 <%page args="kernels, runtime_img, basearch, inroot, outroot, product, isolabel"/>
 <%
 configdir="tmp/config_files/x86"
@@ -228,7 +242,7 @@ runcmd isohybrid ${efihybrid} ${outroot}/images/boot.iso
 treeinfo images-${basearch} boot.iso images/boot.iso
 __EOF__
 
-cat <<__EOF__ | sudo tee >/dev/null /var/lib/mock/fedora-${RELEASE}-x86_64/root/home/build/share/lorax/templates.d/99-generic/live/config_files/x86/isolinux.cfg
+cat >/var/lib/mock/fedora-${RELEASE}-x86_64/root/home/build/share/lorax/templates.d/99-generic/live/config_files/x86/isolinux.cfg <<__EOF__
 default vesamenu.c32
 timeout 600
 
@@ -351,7 +365,7 @@ label returntomain
 menu end
 __EOF__
 
-cat <<__EOF__ | sudo tee >/dev/null /var/lib/mock/fedora-${RELEASE}-x86_64/root/home/build/share/lorax/templates.d/99-generic/live/config_files/x86/grub2-efi.cfg
+cat >/var/lib/mock/fedora-${RELEASE}-x86_64/root/home/build/share/lorax/templates.d/99-generic/live/config_files/x86/grub2-efi.cfg <<__EOF__
 set default="0"
 
 function load_video {
@@ -420,32 +434,28 @@ BASE="/var/lib/mock/$MOCKDIR/root"
 # Create the bootstrap.ks file from the startup files.
 ./make-bootstrap-ks
 
-# Delete the old kickstart files.
-sudo rm -f $BASE/$BUILD/*.ks
-
 # Copy the kickstart files into mock.
 mv -f bootstrap.ks $BASE/$BUILD
 cp -a -f fedora-live-base.ks $BASE/$BUILD
 cp -a fedora-live-workstation.ks $BASE/$BUILD
-cp -a $BASE/usr/share/spin-kickstarts/fedora-repo.ks $BASE/$BUILD
-cp -a $BASE/usr/share/spin-kickstarts/fedora-repo-rawhide.ks $BASE/$BUILD
-cp -a $BASE/usr/share/spin-kickstarts/fedora-repo-not-rawhide.ks $BASE/$BUILD
-cp -a $BASE/usr/share/spin-kickstarts/fedora-workstation-common.ks $BASE/$BUILD
-
-if [ -n "$(grep "# %include fedora-repo-not-rawhide.ks" $BASE/$BUILD/fedora-repo.ks)" ]; then
-  echo "Setting repo to not rawhide."
-  cat >$BASE/$BUILD/fedora-repo.ks <<-EOD
-	# For the master branch the following should be uncommented
-	# %include fedora-repo-rawhide.ks
-
-	# For non-master branches the following should be uncommented
-	%include fedora-repo-not-rawhide.ks
-	EOD
-fi 
 
 # Flatten the modified workstation kickstart in mock.
 mock -r $MOCKDIR --shell --old-chroot <<-EOD
 	cd $BUILD
+	cp /usr/share/spin-kickstarts/fedora-repo.ks .
+	cp /usr/share/spin-kickstarts/fedora-repo-rawhide.ks .
+	cp /usr/share/spin-kickstarts/fedora-repo-not-rawhide.ks .
+	cp /usr/share/spin-kickstarts/fedora-workstation-common.ks .
+	if [ -n "\$(grep "# %include fedora-repo-not-rawhide.ks" fedora-repo.ks)" ]; then
+	  echo "Setting repo to not rawhide."
+	  cat >fedora-repo.ks <<-DOE
+		# For the master branch the following should be uncommented
+		# %include fedora-repo-rawhide.ks
+
+		# For non-master branches the following should be uncommented
+		%include fedora-repo-not-rawhide.ks
+		DOE
+	fi
 	ksflatten -c fedora-live-workstation.ks -o fedora-live-workstation-flat.ks
 	EOD
 
@@ -486,9 +496,8 @@ mock -r $MOCKDIR --shell --old-chroot <<-EOD
 	rm -f fedora-repo.ks
 	rm -f fedora-repo-not-rawhide.ks
 	rm -f fedora-workstation-common.ks
+	chown 1000:1000 changes.diff
 	EOD
-
-sudo chown 1000:1000 $BASE/$BUILD/changes.diff
 
 mv $BASE/$BUILD/changes.diff xen-bootstrap-iso-fedora.diff
 
