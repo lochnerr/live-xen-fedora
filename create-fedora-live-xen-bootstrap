@@ -39,6 +39,10 @@ if [ ! -d /var/lib/mock/$MOCKDIR/root/usr/share/lorax/templates.d/99-generic ]; 
   exit 1
 fi
 
+if [ -e ./set-pass ]; then
+  . ./set-pass
+fi
+
 if [ -z "$USER_PW" ]; then
   echo "Error: USER_PW environment variable not set!"
   exit 1

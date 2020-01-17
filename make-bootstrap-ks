@@ -9,30 +9,26 @@ echo "Startup dir is: $STARTUP."
 
 echo "" >bootstrap.ks
 
-echo "cat >b64 <<-'__EOD__'" >>bootstrap.ks
-cat $STARTUP/bootstrap.service | base64 >>bootstrap.ks
-cat >>bootstrap.ks <<-'__EOF__'
-	__EOD__
+add_file_stanza() {
 
-	/usr/bin/cat b64 | /usr/bin/base64 -d > bootstrap.service
+  FQN="$1"
+  KS="${2:-bootstrap.ks}"
+
+  echo "cat >b64 <<-'__EOD__'" >>$KS
+  cat $FQN | base64 >>$KS
+  cat >>$KS <<-"__EOF__"
+	__EOD__
 
 	__EOF__
+  echo "/usr/bin/cat b64 | /usr/bin/base64 -d > ${FQN##*/}" >>$KS
+  echo >>$KS
+}
 
-echo "cat >b64 <<-'__EOD__'" >>bootstrap.ks
-cat $STARTUP/bin/bootstrap-shutdown | base64 >>bootstrap.ks
+add_file_stanza $STARTUP/bootstrap.service
+add_file_stanza $STARTUP/bin/bootstrap-shutdown
+add_file_stanza $STARTUP/bin/bootstrap-startup
+
 cat >>bootstrap.ks <<-'__EOF__'
-	__EOD__
-
-	/usr/bin/cat b64 | /usr/bin/base64 -d > bootstrap-shutdown
-
-	__EOF__
-
-echo "cat >b64 <<-'__EOD__'" >>bootstrap.ks
-cat $STARTUP/bin/bootstrap-startup | base64 >>bootstrap.ks
-cat >>bootstrap.ks <<-'__EOF__'
-	__EOD__
-
-	/usr/bin/cat b64 | /usr/bin/base64 -d > bootstrap-startup
 	/usr/bin/rm b64
 
 	/usr/bin/chmod 0644  bootstrap.service

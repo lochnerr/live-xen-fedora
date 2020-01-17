@@ -29,6 +29,8 @@ python3-isomd5sum
 xen
 virt-manager
 libvirt
+podman
+toolbox
 %end
 
 %post
