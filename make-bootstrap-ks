@@ -12,18 +12,18 @@ echo "" >bootstrap.ks
 add_file_stanza() {
 
   FQN="$1"
-  KS="${2:-bootstrap.ks}"
 
-  echo "cat >b64 <<-'__EOD__'" >>$KS
-  cat $FQN | base64 >>$KS
-  cat >>$KS <<-"__EOF__"
+  echo "cat >b64 <<-'__EOD__'" >>bootstrap.ks
+  cat $FQN | base64 >>bootstrap.ks
+  cat >>bootstrap.ks <<-"__EOF__"
 	__EOD__
 
 	__EOF__
-  echo "/usr/bin/cat b64 | /usr/bin/base64 -d > ${FQN##*/}" >>$KS
-  echo >>$KS
+  echo "/usr/bin/cat b64 | /usr/bin/base64 -d > ${FQN##*/}" >>bootstrap.ks
+  echo >>bootstrap.ks
 }
 
+add_file_stanza $STARTUP/bin/bootstrap-install
 add_file_stanza $STARTUP/bootstrap.service
 add_file_stanza $STARTUP/bin/bootstrap-shutdown
 add_file_stanza $STARTUP/bin/bootstrap-startup
@@ -31,20 +31,8 @@ add_file_stanza $STARTUP/bin/bootstrap-startup
 cat >>bootstrap.ks <<-'__EOF__'
 	/usr/bin/rm b64
 
-	/usr/bin/chmod 0644  bootstrap.service
-	/usr/bin/chmod 0755  bootstrap-shutdown
-	/usr/bin/chmod 0755  bootstrap-startup
-
-	/usr/bin/mv bootstrap.service  /usr/lib/systemd/system/
-	/usr/bin/mv bootstrap-shutdown /usr/local/bin/
-	/usr/bin/mv bootstrap-startup  /usr/local/bin/
-
-	/usr/sbin/restorecon  /usr/lib/systemd/system/bootstrap.service
-	/usr/sbin/restorecon  /usr/local/bin/bootstrap-shutdown
-	/usr/sbin/restorecon  /usr/local/bin/bootstrap-startup
-
-	# Enable the bootstrap service now!
-	/usr/bin/systemctl enable bootstrap.service || :
+	/usr/bin/chmod 0755  bootstrap-install
+	./bootstrap-install
 
 	__EOF__
 
