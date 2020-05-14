@@ -25,7 +25,7 @@ set -e
 # Releases 28/29 build on 28.
 # Release 31 builds on 30.
 
-RELEASE="31"
+RELEASE="32"
 
 MOCKDIR="fedora-${RELEASE}-x86_64"
 
@@ -515,7 +515,6 @@ fi
 
 mv $BASE/$BUILD/changes.diff $TARGET.diff
 
-#--title TITLE            Substituted for @TITLE@ in bootloader config files
 #--project PROJECT        substituted for @PROJECT@ in bootloader config files
 #--releasever RELEASEVER  substituted for @VERSION@ in bootloader config files
 
@@ -580,7 +579,6 @@ cat >/$BUILD/build.sh <<-__EOF__
 	  --logfile=./logs/iso/iso.log \
 	  --project=${PROJECT} \
 	  --releasever=${RELEASE} \
-	  --title=${PROJECT} \
 	  --nomacboot \
 	  --tmp=./tmp
 

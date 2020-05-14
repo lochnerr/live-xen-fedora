@@ -5,7 +5,7 @@ set -e
 
 # Script to install mock with livemedia-creator.
 
-RELEASE="31"
+RELEASE="32"
 
 MOCKDIR="fedora-${RELEASE}-x86_64"
 BUILD="home/build"
@@ -70,7 +70,7 @@ fi
 
 if [ ! -d /var/lib/mock/$MOCKDIR/root/$BUILD ]; then
   echo "Setting up build directory /$BUILD in mock environement."
-  mock -r $MOCKDIR --shell --old-chroot <<-EOD
+  mock -r $MOCKDIR --shell --isolation=simple <<-EOD
 	mkdir -p /$BUILD
 	chown 1000:1000 /$BUILD
 	EOD
