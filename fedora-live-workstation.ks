@@ -31,6 +31,7 @@ virt-manager
 libvirt
 podman
 toolbox
+smartmontools
 %end
 
 %post
