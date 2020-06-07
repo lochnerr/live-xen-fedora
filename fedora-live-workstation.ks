@@ -32,6 +32,8 @@ libvirt
 podman
 toolbox
 smartmontools
+NetworkManager-tui
+wireguard-tools
 %end
 
 %post
