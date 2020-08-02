@@ -25,7 +25,9 @@ set -e
 # Releases 28/29 build on 28.
 # Release 31 builds on 30.
 
-RELEASE="32"
+[ "$1" != "diff" ] && [ -z "$RELEASE" ] && RELEASE="$1"
+RELEASE="${RELEASE:-32}"
+echo "Release is ${RELEASE}."
 
 MOCKDIR="fedora-${RELEASE}-x86_64"
 
@@ -50,7 +52,7 @@ fi
 
 update_lorax_files() {
 
-  mock -r $MOCKDIR --shell --old-chroot <<-EOD
+  mock -r $MOCKDIR --shell --isolation=simple <<-EOD
 	# Remove the build lorax templates.
 	rm -rf /$BUILD/share
 	# Copy the baseline lorax templates.
@@ -60,7 +62,7 @@ update_lorax_files() {
 	EOD
 
 # Create the modified templates in mock.
-  mock -r $MOCKDIR --shell --old-chroot <<-'EOD'
+  mock -r $MOCKDIR --shell --isolation=simple <<-'EOD'
 cat >/home/build/share/lorax/templates.d/99-generic/live/x86.tmpl <<'__EOF__'
 <%page args="kernels, runtime_img, basearch, inroot, outroot, product, isolabel, extra_boot_args"/>
 <%
@@ -389,7 +391,7 @@ TYPE="live"
 # Create the bootstrap.ks file from the startup files.
 [ "$TYPE" = "live" ] && ./make-bootstrap-ks
 
-mock -r $MOCKDIR --shell --old-chroot <<-EOD
+mock -r $MOCKDIR --shell --isolation=simple <<-EOD
 	mkdir -p /$BUILD
 	chown -R 1000:1000 /$BUILD
 	EOD
@@ -406,7 +408,7 @@ else
 fi
 
 # Set repo.
-mock -r $MOCKDIR --shell --old-chroot <<-EOD
+mock -r $MOCKDIR --shell --isolation=simple <<-EOD
 	cd /$BUILD
 	cp /usr/share/spin-kickstarts/fedora-repo.ks .
 	cp /usr/share/spin-kickstarts/fedora-repo-rawhide.ks .
@@ -425,7 +427,7 @@ mock -r $MOCKDIR --shell --old-chroot <<-EOD
 
 # Flatten the modified workstation kickstart in mock.
 if [ "$TYPE" = "live" ]; then
-  mock -r $MOCKDIR --shell --old-chroot <<-EOD
+  mock -r $MOCKDIR --shell --isolation=simple <<-EOD
 	cd /$BUILD
 	cp /usr/share/spin-kickstarts/fedora-workstation-common.ks .
 	ksflatten -c fedora-live-workstation.ks -o fedora-live-workstation-flat.ks
@@ -434,7 +436,7 @@ if [ "$TYPE" = "live" ]; then
 	user --name=admin --password=$USER_PW --iscrypted --gecos="System Administrator"' fedora-live-workstation-flat.ks
 	EOD
 else
-  mock -r $MOCKDIR --shell --old-chroot <<-EOD
+  mock -r $MOCKDIR --shell --isolation=simple <<-EOD
 	cd /$BUILD
 	ksflatten -c fedora-disk-minimal.ks -o fedora-disk-minimal-flat.ks
 	EOD
@@ -447,7 +449,7 @@ if [ "$TYPE" = "live" ]; then
   TARGET="xen-bootstrap-iso-fedora"
 
   # Do the diffs in mock.
-  mock -r $MOCKDIR --shell --old-chroot <<-EOD
+  mock -r $MOCKDIR --shell --isolation=simple <<-EOD
 	cd /$BUILD
 
 	echo >changes.diff
@@ -490,7 +492,7 @@ else
   TARGET="disk-minimal-fedora"
 
   # Do the diffs in mock.
-  mock -r $MOCKDIR --shell --old-chroot <<-EOD
+  mock -r $MOCKDIR --shell --isolation=simple <<-EOD
 	cd /$BUILD
 
 	echo >changes.diff
@@ -519,7 +521,7 @@ mv $BASE/$BUILD/changes.diff $TARGET.diff
 #--releasever RELEASEVER  substituted for @VERSION@ in bootloader config files
 
 if [ "$TYPE" = "live" ]; then
-  mock -r $MOCKDIR --shell --old-chroot <<-EOX
+  mock -r $MOCKDIR --shell --isolation=simple <<-EOX
 # Create build script to be executed by mock.
 cat >/$BUILD/build.sh <<-__EOF__
 	#!/bin/sh
@@ -593,7 +595,7 @@ cat >/$BUILD/build.sh <<-__EOF__
 	chmod +x /$BUILD/build.sh
 	EOX
 else
-  mock -r $MOCKDIR --shell --old-chroot <<-EOX
+  mock -r $MOCKDIR --shell --isolation=simple <<-EOX
 # Create build script to be executed by mock.
 cat >/$BUILD/build.sh <<-__EOF__
 	#!/bin/sh
@@ -646,14 +648,21 @@ cat >/$BUILD/build.sh <<-__EOF__
 	EOX
 fi
 
-if [ "$1" != "diff" ]; then
+# Quit now if only doing difference listing.
+[ "$1" = "diff" ] && diff="true"
+[ "$2" = "diff" ] && diff="true"
+
+if [ -z "$diff" ]; then
 
   # Run build in mock environment.
-  time mock -r $MOCKDIR --shell --old-chroot \
+  time mock -r $MOCKDIR --shell --isolation=simple \
     /$BUILD/build.sh
 
   # Get the iso image from the mock environment.
   mv -f $BASE/$BUILD/lmc/*.iso .
+
+  # Delete the multi-gigabyte livexen image file.
+  sudo rm -f $BASE/$BUILD/image/livexen.img
 
   # Move the log files.
   rm -rf logs
