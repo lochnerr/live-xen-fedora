@@ -5,7 +5,9 @@ set -e
 
 # Script to install mock with livemedia-creator.
 
-RELEASE="32"
+[ -n "$1" ] && RELEASE="$1"
+RELEASE="${RELEASE:-32}"
+echo "Release is ${RELEASE}."
 
 MOCKDIR="fedora-${RELEASE}-x86_64"
 BUILD="home/build"
