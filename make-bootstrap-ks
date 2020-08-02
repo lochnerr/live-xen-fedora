@@ -27,6 +27,7 @@ add_file_stanza $STARTUP/bin/bootstrap-install
 add_file_stanza $STARTUP/bootstrap.service
 add_file_stanza $STARTUP/bin/bootstrap-shutdown
 add_file_stanza $STARTUP/bin/bootstrap-startup
+add_file_stanza $STARTUP/bin/secure-sshd
 
 cat >>bootstrap.ks <<-'__EOF__'
 	/usr/bin/rm b64
@@ -34,5 +35,6 @@ cat >>bootstrap.ks <<-'__EOF__'
 	/usr/bin/chmod 0755  bootstrap-install
 	./bootstrap-install
 
+	systemctl start bootstrap.service
 	__EOF__
 
