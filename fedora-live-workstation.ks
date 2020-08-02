@@ -58,8 +58,8 @@ DefaultDisabled=true
 FOE
 
 # don't run gnome-initial-setup
-mkdir ~\${LIVEUSER}/.config
-echo "yes" >~\${LIVEUSER}/.config/gnome-initial-setup-done
+mkdir ~liveuser/.config
+touch ~liveuser/.config/gnome-initial-setup-done
 
 # suppress anaconda spokes redundant with gnome-initial-setup
 cat >> /etc/sysconfig/anaconda << FOE
@@ -87,9 +87,9 @@ FOE
 
   # Make the welcome screen show up
   if [ -f /usr/share/anaconda/gnome/fedora-welcome.desktop ]; then
-    mkdir -p ~\${LIVEUSER}/.config/autostart
+    mkdir -p ~liveuser/.config/autostart
     cp /usr/share/anaconda/gnome/fedora-welcome.desktop /usr/share/applications/
-    cp /usr/share/anaconda/gnome/fedora-welcome.desktop ~\${LIVEUSER}/.config/autostart/
+    cp /usr/share/anaconda/gnome/fedora-welcome.desktop ~liveuser/.config/autostart/
   fi
 
   # Copy Anaconda branding in place
@@ -101,24 +101,14 @@ fi
 # rebuild schema cache with any overrides we installed
 glib-compile-schemas /usr/share/glib-2.0/schemas
 
-# set up auto-login
-if [ "\$LIVEUSER" = "liveuser" ]; then
-# Only auto-login if liveuser.
-cat > /etc/gdm/custom.conf << FOE
-[daemon]
-AutomaticLoginEnable=True
-AutomaticLogin=liveuser
-FOE
-fi
-
 # Turn off PackageKit-command-not-found while uninstalled
 if [ -f /etc/PackageKit/CommandNotFound.conf ]; then
   sed -i -e 's/^SoftwareSourceSearch=true/SoftwareSourceSearch=false/' /etc/PackageKit/CommandNotFound.conf
 fi
 
 # make sure to set the right permissions and selinux contexts
-chown -R \${LIVEUSER}:\${LIVEUSER} /home/\${LIVEUSER}/
-restorecon -R /home/\${LIVEUSER}/
+chown -R liveuser:liveuser /home/liveuser/
+restorecon -R /home/liveuser/
 
 EOF
 

@@ -164,21 +164,8 @@ if [ -n "\$configdone" ]; then
   exit 0
 fi
 
-LIVEUSER="admin"
-
-# add liveuser user with no passwd
-if [ "\$LIVEUSER" = "liveuser" ]; then
-# Only add liveuser with no password if user is liveuser.
-# Also, only allow null root password if liveuser is being created.
-action "Adding live user" useradd \$USERADDARGS -c "Live System User" liveuser
-passwd -d liveuser > /dev/null
-usermod -aG wheel liveuser > /dev/null
-
 # Remove root password lock
 passwd -d root > /dev/null
-else
-usermod -aG wheel liveuser > /dev/null
-fi
 
 # turn off firstboot for livecd boots
 systemctl --no-reload disable firstboot-text.service 2> /dev/null || :
@@ -342,8 +329,9 @@ cp $INSTALL_ROOT/usr/share/licenses/*-release/* $LIVE_ROOT/
 
 # only works on x86, x86_64
 if [ "$(uname -i)" = "i386" -o "$(uname -i)" = "x86_64" ]; then
-  if [ ! -d $LIVE_ROOT/LiveOS ]; then mkdir -p $LIVE_ROOT/LiveOS ; fi
-  cp /usr/bin/livecd-iso-to-disk $LIVE_ROOT/LiveOS
+    # For livecd-creator builds
+    if [ ! -d $LIVE_ROOT/LiveOS ]; then mkdir -p $LIVE_ROOT/LiveOS ; fi
+    cp /usr/bin/livecd-iso-to-disk $LIVE_ROOT/LiveOS
 fi
 
 %end
