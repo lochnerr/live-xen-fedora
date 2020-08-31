@@ -340,7 +340,7 @@ insmod ext2
 set timeout=60
 ### END /etc/grub.d/00_header ###
 
-search --no-floppy --set=root -l '@ISOLABEL@'
+search --no-floppy --set=root -l '@ISOLABEL@' -f '@ISOLABEL@'
 
 ### BEGIN /etc/grub.d/10_linux ###
 menuentry 'Start @PRODUCT@ @VERSION@ with Xen hypervisor' --class fedora --class gnu-linux --class gnu --class os --class xen {
@@ -661,13 +661,12 @@ if [ -z "$diff" ]; then
   # Get the iso image from the mock environment.
   mv -f $BASE/$BUILD/lmc/*.iso .
 
-  # Delete the multi-gigabyte livexen image file.
-  sudo rm -f $BASE/$BUILD/image/livexen.img
-
   # Move the log files.
   rm -rf logs
   mv $BASE/$BUILD/logs .
 
+  # Delete the multi-gigabyte livexen image file.
+  sudo rm -f $BASE/$BUILD/image/livexen.img
 fi
 
 echo "Done!"

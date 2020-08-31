@@ -19,22 +19,33 @@ add_file_stanza() {
 	__EOD__
 
 	__EOF__
-  echo "/usr/bin/cat b64 | /usr/bin/base64 -d > ${FQN##*/}" >>bootstrap.ks
+  dir="$2"
+  [ -z "$2" ] && dir="."
+  echo "/usr/bin/cat b64 | /usr/bin/base64 -d > $dir/${FQN##*/}" >>bootstrap.ks
+  [ -n "$3" ] && echo "/usr/bin/chmod $3 $dir/${FQN##*/}"        >>bootstrap.ks
+  echo "/usr/sbin/restorecon $dir/${FQN##*/}"                    >>bootstrap.ks
   echo >>bootstrap.ks
 }
 
-add_file_stanza $STARTUP/bin/bootstrap-install
-add_file_stanza $STARTUP/bootstrap.service
-add_file_stanza $STARTUP/bin/bootstrap-shutdown
-add_file_stanza $STARTUP/bin/bootstrap-startup
-add_file_stanza $STARTUP/bin/secure-sshd
+add_file_stanza $STARTUP/bootstrap.service        /usr/lib/systemd/system  0744
+add_file_stanza $STARTUP/bin/bootstrap-shutdown   /usr/local/bin  0755
+add_file_stanza $STARTUP/bin/bootstrap-startup    /usr/local/bin  0755
+add_file_stanza $STARTUP/bin/secure-sshd          /usr/local/bin  0755
 
 cat >>bootstrap.ks <<-'__EOF__'
 	/usr/bin/rm b64
 
-	/usr/bin/chmod 0755  bootstrap-install
-	./bootstrap-install
+	# Secure the sshd daemon.
+	/usr/local/bin/secure-sshd            | tee -a /var/log/bootstrap-install.log
 
-	systemctl start bootstrap.service
+	# Enable and start the bootstrap service.
+	/usr/bin/systemctl enable bootstrap.service  >>/var/log/bootstrap-install.log
+	/usr/bin/systemctl start  bootstrap.service  >>/var/log/bootstrap-install.log
+
+	# Write the results of securing sshd to the system log so that in a hosted
+	# environment (e.g. aws) it can be verified that it ran correctly.  Or, what
+	# went wrong if it failed.
+	/usr/bin/logger -t bootstrap                -f /var/log/bootstrap-install.log
+
 	__EOF__
 
