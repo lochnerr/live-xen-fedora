@@ -34,6 +34,8 @@ toolbox
 smartmontools
 NetworkManager-tui
 wireguard-tools
+lz4
+crontabs
 %end
 
 %post

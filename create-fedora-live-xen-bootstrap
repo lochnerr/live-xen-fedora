@@ -25,8 +25,12 @@ set -e
 # Releases 28/29 build on 28.
 # Release 31 builds on 30.
 
+XEN_OPTS="dom0_mem=4096M,max:8192M dom0_max_vcpus=2 dom0_vcpus_pin=true loglvl=all guest_loglvl=all iommu=on,verbose msi=1 conring_size=4M com1=115200,8n1 console=com1,vga"
+# Note: PVH dom0 will not run on KVM.  It does run on bare metal with i/o virtualization.
+#XEN_OPTS="dom0=pvh $XEN_OPTS"
+
 [ "$1" != "diff" ] && [ -z "$RELEASE" ] && RELEASE="$1"
-RELEASE="${RELEASE:-32}"
+RELEASE="${RELEASE:-34}"
 echo "Release is ${RELEASE}."
 
 MOCKDIR="fedora-${RELEASE}-x86_64"
@@ -262,7 +266,7 @@ label xen
   menu label Start @PRODUCT@ @VERSION@ with ^Xen hypervisor
   menu default
   kernel mboot.c32
-  append xen.gz dom0_mem=4096M,max:8192M dom0_max_vcpus=2 dom0_vcpus_pin=true loglvl=all guest_loglvl=all iommu=on,verbose msi=1 conring_size=4M com1=115200,8n1 console=com1,vga --- vmlinuz initrd=initrd.img @ROOT@ @EXTRA@ rd.live.image xencons=hvc console=hvc0 console=tty0 --- initrd.img
+  append xen.gz $XEN_OPTS --- vmlinuz initrd=initrd.img @ROOT@ @EXTRA@ rd.live.image xencons=hvc console=hvc0 console=tty0 --- initrd.img
 
 label linux
   menu label ^Start @PRODUCT@ @VERSION@
@@ -272,7 +276,7 @@ label linux
 label checkxen
   menu label Test this media & start @PRODUCT@ @VERSION@ with Xen hypervisor
   kernel mboot.c32
-  append xen.gz dom0_mem=4096M,max:8192M dom0_max_vcpus=2 dom0_vcpus_pin=true loglvl=all guest_loglvl=all iommu=on,verbose msi=1 conring_size=4M com1=115200,8n1 console=com1,vga --- vmlinuz initrd=initrd.img @ROOT@ @EXTRA@ rd.live.image xencons=hvc console=hvc0 console=tty0 rd.live.check --- initrd.img
+  append xen.gz $XEN_OPTS --- vmlinuz initrd=initrd.img @ROOT@ @EXTRA@ rd.live.image xencons=hvc console=hvc0 console=tty0 rd.live.check --- initrd.img
 
 label check
   menu label Test this ^media & start @PRODUCT@ @VERSION@
@@ -346,7 +350,7 @@ search --no-floppy --set=root -l '@ISOLABEL@' -f '@ISOLABEL@'
 menuentry 'Start @PRODUCT@ @VERSION@ with Xen hypervisor' --class fedora --class gnu-linux --class gnu --class os --class xen {
         insmod multiboot2
         echo    'Loading Xen ...'
-        multiboot2 /isolinux/xen.gz dom0_mem=4096M,max:8192M dom0_max_vcpus=2 dom0_vcpus_pin=true loglvl=all guest_loglvl=all iommu=on,verbose msi=1 conring_size=4M com1=115200,8n1 console=com1,vga
+        multiboot2 /isolinux/xen.gz $XEN_OPTS
         echo    'Loading Linux ...'
         module2  @KERNELPATH@ @ROOT@ @EXTRA@ rd.live.image ignore_loglevel intel_iommu=igfx_off log_buf_len=128M console=hvc0
         echo    'Loading initial ramdisk ...'
@@ -359,7 +363,7 @@ menuentry 'Start @PRODUCT@ @VERSION@' --class fedora --class gnu-linux --class g
 menuentry 'Test this media & start @PRODUCT@ @VERSION@ with Xen hypervisor' --class fedora --class gnu-linux --class gnu --class os --class xen {
         insmod multiboot2
         echo    'Loading Xen ...'
-        multiboot2 /isolinux/xen.gz dom0_mem=4096M,max:8192M dom0_max_vcpus=2 dom0_vcpus_pin=true loglvl=all guest_loglvl=all iommu=on,verbose msi=1 conring_size=4M com1=115200,8n1 console=com1,vga
+        multiboot2 /isolinux/xen.gz $XEN_OPTS
         echo    'Loading Linux ...'
         module2  @KERNELPATH@ @ROOT@ @EXTRA@ rd.live.image ignore_loglevel intel_iommu=igfx_off log_buf_len=128M console=hvc0 rd.live.check
         echo    'Loading initial ramdisk ...'
@@ -666,7 +670,12 @@ if [ -z "$diff" ]; then
   mv $BASE/$BUILD/logs .
 
   # Delete the multi-gigabyte livexen image file.
-  sudo rm -f $BASE/$BUILD/image/livexen.img
+  mock -r $MOCKDIR --shell --isolation=simple <<-EOD
+	if [ -e /$BUILD/image/livexen.img ]; then
+	  echo "Removing old image."
+	  rm -f /$BUILD/image/livexen.img
+	fi
+	EOD
 fi
 
 echo "Done!"
