@@ -36,6 +36,7 @@ NetworkManager-tui
 wireguard-tools
 lz4
 crontabs
+google-authenticator
 %end
 
 %post
