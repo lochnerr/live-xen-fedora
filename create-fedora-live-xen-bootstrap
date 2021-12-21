@@ -1,36 +1,32 @@
 #!/bin/sh
-set -e
 
 # create-fedora-live-xen-bootstrap
-# create-fedora-disk-minimal-bootstrap
 
 # Script to create a Fedora Live Bootstrap iso with livemedia-creator.
 
-# This builds the live media in a mock chroot.  It will install mock, if needed.
-# All other packages (lorax-lmc-novirt, vim-minimal, pykickstart, and
-# spin-kickstarts) are installed in the mock environment, i.e. it does not
-# pollute the workstation.
+# This builds the live media in a mock chroot.  
 
 # See: https://fedoraproject.org/wiki/Livemedia-creator-_How_to_create_and_use_a_Live_CD
 #   for information on how to setup livemedia-creator with mock and lorax.
 
-# Releases:
-# 26 2017-07-11 4.11 2018-05-29
-# 27 2017-11-14 4.13
-# 28 2018-05-01 4.16
-# 29 2018-10-23 4.??
+set -e
 
-# 31 2019-11-21 5.3.12
-
-# Releases 28/29 build on 28.
-# Release 31 builds on 30.
+# Verify that the Fedora mock configuration is the same as the running o/s.
+# The symbolic link '/etc/mock/default.cfg' does not get updated after a system upgrade.
+. /etc/os-release
+if [ "$VERSION_ID" = "$(ls -l /etc/mock/default.cfg | grep -o 'fedora-[0-9][0-9]' | cut -d '-' -f 2)" ]; then
+  echo "The /etc/mock/default.cfg link is linked correctly."
+else
+  echo "The /etc/mock/default.cfg link is not linked correctly."
+  exit 1
+fi
 
 XEN_OPTS="dom0_mem=4096M,max:8192M dom0_max_vcpus=2 dom0_vcpus_pin=true loglvl=all guest_loglvl=all iommu=on,verbose msi=1 conring_size=4M com1=115200,8n1 console=com1,vga"
 # Note: PVH dom0 will not run on KVM.  It does run on bare metal with i/o virtualization.
-#XEN_OPTS="dom0=pvh $XEN_OPTS"
+XEN_OPTS="dom0=pvh $XEN_OPTS"
 
 [ "$1" != "diff" ] && [ -z "$RELEASE" ] && RELEASE="$1"
-RELEASE="${RELEASE:-34}"
+RELEASE="${RELEASE:-35}"
 echo "Release is ${RELEASE}."
 
 MOCKDIR="fedora-${RELEASE}-x86_64"
@@ -38,6 +34,9 @@ MOCKDIR="fedora-${RELEASE}-x86_64"
 PROJECT="Fedora-Bootstrap-Live"
 BUILD="home/build"
 BASE="/var/lib/mock/$MOCKDIR/root"
+
+USR="$(id -u)"
+GRP="$(id -g)"
 
 if [ ! -d /var/lib/mock/$MOCKDIR/root/usr/share/lorax/templates.d/99-generic ]; then
   echo "Error: Lorax templates not installed in mock environement."
@@ -54,480 +53,11 @@ if [ -z "$USER_PW" ]; then
   exit 1
 fi
 
-update_lorax_files() {
-
-  mock -r $MOCKDIR --shell --isolation=simple <<-EOD
-	# Remove the build lorax templates.
-	rm -rf /$BUILD/share
-	# Copy the baseline lorax templates.
-	mkdir -p /$BUILD/share
-	cp -a /usr/share/lorax /$BUILD/share
-	chown -R 1000:1000 /$BUILD/share
-	EOD
-
-# Create the modified templates in mock.
-  mock -r $MOCKDIR --shell --isolation=simple <<-'EOD'
-cat >/home/build/share/lorax/templates.d/99-generic/live/x86.tmpl <<'__EOF__'
-<%page args="kernels, runtime_img, basearch, inroot, outroot, product, isolabel, extra_boot_args"/>
-<%
-configdir="tmp/config_files/x86"
-SYSLINUXDIR="usr/share/syslinux"
-PXEBOOTDIR="images/pxeboot"
-BOOTDIR="isolinux"
-KERNELDIR=PXEBOOTDIR
-LIVEDIR="LiveOS"
-LORAXDIR="usr/share/lorax/"
-
-## Don't allow spaces or escape characters in the iso label
-def valid_label(ch):
-    return ch.isalnum() or ch == '_'
-
-isolabel = ''.join(ch if valid_label(ch) else '-' for ch in isolabel)
-
-import os
-from os.path import basename
-from pylorax.sysutils import joinpaths
-
-# Test the runtime_img, if it is > 4GiB we need to set -iso-level to 3
-if os.stat(joinpaths(inroot, runtime_img)).st_size >= 4*1024**3:
-    isoargs = "-iso-level 3"
-else:
-    isoargs = ""
-%>
-
-mkdir ${LIVEDIR}
-install ${runtime_img} ${LIVEDIR}/squashfs.img
-treeinfo stage2 mainimage ${LIVEDIR}/squashfs.img
-
-## install bootloader and config files
-mkdir ${BOOTDIR}
-install ${SYSLINUXDIR}/isolinux.bin ${BOOTDIR}
-install ${SYSLINUXDIR}/vesamenu.c32 ${BOOTDIR}
-install ${SYSLINUXDIR}/ldlinux.c32 ${BOOTDIR}
-install ${SYSLINUXDIR}/libcom32.c32 ${BOOTDIR}
-install ${SYSLINUXDIR}/libutil.c32 ${BOOTDIR}
-install boot/xen.gz ${BOOTDIR}
-install ${SYSLINUXDIR}/mboot.c32 ${BOOTDIR}
-install ${configdir}/isolinux.cfg ${BOOTDIR}
-install ${configdir}/boot.msg ${BOOTDIR}
-install ${configdir}/grub.conf ${BOOTDIR}
-install usr/share/anaconda/boot/syslinux-splash.png ${BOOTDIR}/splash.png
-install boot/memtest* ${BOOTDIR}/memtest
-
-## configure bootloader
-replace @VERSION@ ${product.version} ${BOOTDIR}/grub.conf ${BOOTDIR}/isolinux.cfg ${BOOTDIR}/*.msg
-replace @PRODUCT@ '${product.name}'  ${BOOTDIR}/grub.conf ${BOOTDIR}/isolinux.cfg ${BOOTDIR}/*.msg
-replace @ROOT@ 'root=live:CDLABEL=${isolabel|udev}' ${BOOTDIR}/isolinux.cfg
-replace @EXTRA@ '${extra_boot_args}' ${BOOTDIR}/isolinux.cfg
-
-## install kernels
-mkdir ${KERNELDIR}
-%for kernel in kernels:
-    %if kernel.flavor:
-        installkernel images-xen ${kernel.path} ${KERNELDIR}/vmlinuz-${kernel.flavor}
-        installinitrd images-xen ${kernel.initrd.path} ${KERNELDIR}/initrd-${kernel.flavor}.img
-    %else:
-        installkernel images-${basearch} ${kernel.path} ${KERNELDIR}/vmlinuz
-        installinitrd images-${basearch} ${kernel.initrd.path} ${KERNELDIR}/initrd.img
-    %endif
-%endfor
-
-hardlink ${KERNELDIR}/vmlinuz ${BOOTDIR}
-hardlink ${KERNELDIR}/initrd.img ${BOOTDIR}
-%if basearch == 'x86_64':
-    treeinfo images-xen kernel ${KERNELDIR}/vmlinuz
-    treeinfo images-xen initrd ${KERNELDIR}/initrd.img
-%endif
-
-## WHeeeeeeee, EFI.
-<% efiargs=""; efigraft=""; efiarch32=None; efiarch64=None %>
-%if exists("boot/efi/EFI/*/gcdia32.efi"):
-    <% efiarch32 = 'IA32' %>
-%endif
-%if exists("boot/efi/EFI/*/gcdx64.efi"):
-    <% efiarch64 = 'X64' %>
-%endif
-%if (efiarch32 or efiarch64) and basearch != 'i386':
-    <%
-    efigraft="EFI/BOOT={0}/EFI/BOOT".format(outroot)
-    images = [("images/efiboot.img", "-isohybrid-gpt-basdat")]
-    if domacboot:
-        images.append(("images/macboot.img", "-isohybrid-gpt-hfsplus"))
-    %>
-    %for img, hybrid in images:
-        <%
-        efiargs += " -eltorito-alt-boot -e {0} -no-emul-boot {1}".format(img, hybrid)
-        efigraft += " {0}={1}/{0}".format(img,outroot)
-        %>
-        treeinfo images-${basearch} ${img|basename} ${img}
-    %endfor
-    <%include file="efi.tmpl" args="configdir=configdir, KERNELDIR=KERNELDIR, efiarch32=efiarch32, efiarch64=efiarch64, isolabel=isolabel, extra_boot_args=extra_boot_args"/>
-%endif
-
-# Create optional product.img and updates.img
-<% filegraft=""; images=["product", "updates"]; compressargs=""; %>
-%if basearch == 'i386':
-    # Limit the amount of memory xz uses on i386
-    <% compressargs="--xz -9 --memlimit-compress=3700MiB" %>
-%endif
-%for img in images:
-    %if exists("%s/%s/" % (LORAXDIR, img)):
-        installimg ${compressargs} ${LORAXDIR}/${img}/ images/${img}.img
-        treeinfo images-${basearch} ${img}.img images/${img}.img
-        <% filegraft += " images/{0}.img={1}/images/{0}.img".format(img, outroot) %>
-    %endif
-%endfor
-
-# Add the license files
-%for f in glob("/usr/share/licenses/*-release/*"):
-    install ${f} ${f|basename}
-    <% filegraft += " {0}={1}/{0}".format(basename(f), outroot) %>
-%endfor
-
-mkdir EFI/BOOT/x86_64-efi
-install usr/lib/grub/x86_64-efi/* EFI/BOOT/x86_64-efi
-
-## make boot.iso
-runcmd xorrisofs ${isoargs} -o ${outroot}/images/boot.iso \
-       -isohybrid-mbr /usr/share/syslinux/isohdpfx.bin \
-       -b ${BOOTDIR}/isolinux.bin -c ${BOOTDIR}/boot.cat \
-       -boot-load-size 4 -boot-info-table -no-emul-boot \
-       ${efiargs} -R -J -V '${isolabel}' \
-       -graft-points \
-       ${BOOTDIR}=${outroot}/${BOOTDIR} \
-       ${KERNELDIR}=${outroot}/${KERNELDIR} \
-       ${LIVEDIR}=${outroot}/${LIVEDIR} \
-       ${efigraft} ${filegraft}
-treeinfo images-${basearch} boot.iso images/boot.iso
-__EOF__
-
-cat >/home/build/share/lorax/templates.d/99-generic/live/config_files/x86/isolinux.cfg <<__EOF__
-default vesamenu.c32
-timeout 600
-
-display boot.msg
-
-# Clear the screen when exiting the menu, instead of leaving the menu displayed.
-# For vesamenu, this means the graphical background is still displayed without
-# the menu itself for as long as the screen remains in graphics mode.
-menu clear
-menu background splash.png
-menu title @PRODUCT@ @VERSION@
-menu vshift 8
-menu rows 18
-menu margin 8
-#menu hidden
-menu helpmsgrow 15
-menu tabmsgrow 13
-
-# Border Area
-menu color border * #00000000 #00000000 none
-
-# Selected item
-menu color sel 0 #ffffffff #00000000 none
-
-# Title bar
-menu color title 0 #ff7ba3d0 #00000000 none
-
-# Press [Tab] message
-menu color tabmsg 0 #ff3a6496 #00000000 none
-
-# Unselected menu item
-menu color unsel 0 #84b8ffff #00000000 none
-
-# Selected hotkey
-menu color hotsel 0 #84b8ffff #00000000 none
-
-# Unselected hotkey
-menu color hotkey 0 #ffffffff #00000000 none
-
-# Help text
-menu color help 0 #ffffffff #00000000 none
-
-# A scrollbar of some type? Not sure.
-menu color scrollbar 0 #ffffffff #ff355594 none
-
-# Timeout msg
-menu color timeout 0 #ffffffff #00000000 none
-menu color timeout_msg 0 #ffffffff #00000000 none
-
-# Command prompt text
-menu color cmdmark 0 #84b8ffff #00000000 none
-menu color cmdline 0 #ffffffff #00000000 none
-
-# Do not display the actual menu unless the user presses a key. All that is displayed is a timeout message.
-
-menu tabmsg Press Tab for full configuration options on menu items.
-
-menu separator # insert an empty line
-menu separator # insert an empty line
-
-label xen
-  menu label Start @PRODUCT@ @VERSION@ with ^Xen hypervisor
-  menu default
-  kernel mboot.c32
-  append xen.gz $XEN_OPTS --- vmlinuz initrd=initrd.img @ROOT@ @EXTRA@ rd.live.image xencons=hvc console=hvc0 console=tty0 --- initrd.img
-
-label linux
-  menu label ^Start @PRODUCT@ @VERSION@
-  kernel vmlinuz
-  append initrd=initrd.img @ROOT@ @EXTRA@ rd.live.image
-
-label checkxen
-  menu label Test this media & start @PRODUCT@ @VERSION@ with Xen hypervisor
-  kernel mboot.c32
-  append xen.gz $XEN_OPTS --- vmlinuz initrd=initrd.img @ROOT@ @EXTRA@ rd.live.image xencons=hvc console=hvc0 console=tty0 rd.live.check --- initrd.img
-
-label check
-  menu label Test this ^media & start @PRODUCT@ @VERSION@
-  kernel vmlinuz
-  append initrd=initrd.img @ROOT@ @EXTRA@ rd.live.image rd.live.check
-
-menu separator # insert an empty line
-
-# utilities submenu
-menu begin ^Troubleshooting
-  menu title Troubleshooting
-
-label vesa
-  menu indent count 5
-  menu label Start @PRODUCT@ @VERSION@ in ^basic graphics mode
-  text help
-	Try this option out if you're having trouble starting
-	@PRODUCT@ @VERSION@.
-  endtext
-  kernel vmlinuz
-  append initrd=initrd.img @ROOT@ @EXTRA@ rd.live.image nomodeset
-
-label memtest
-  menu label Run a ^memory test
-  text help
-	If your system is having issues, a problem with your
-	system's memory may be the cause. Use this utility to
-	see if the memory is working correctly.
-  endtext
-  kernel memtest
-
-menu separator # insert an empty line
-
-label local
-  menu label Boot from ^local drive
-  localboot 0xffff
-
-menu separator # insert an empty line
-menu separator # insert an empty line
-
-label returntomain
-  menu label Return to ^main menu
-  menu exit
-
-menu end
-__EOF__
-
-cat >/home/build/share/lorax/templates.d/99-generic/live/config_files/x86/grub2-efi.cfg <<__EOF__
-set default="0"
-
-function load_video {
-  insmod efi_gop
-  insmod efi_uga
-  insmod video_bochs
-  insmod video_cirrus
-  insmod all_video
-}
-
-load_video
-set gfxpayload=keep
-insmod gzio
-insmod part_gpt
-insmod ext2
-
-set timeout=60
-### END /etc/grub.d/00_header ###
-
-search --no-floppy --set=root -l '@ISOLABEL@' -f '@ISOLABEL@'
-
-### BEGIN /etc/grub.d/10_linux ###
-menuentry 'Start @PRODUCT@ @VERSION@ with Xen hypervisor' --class fedora --class gnu-linux --class gnu --class os --class xen {
-        insmod multiboot2
-        echo    'Loading Xen ...'
-        multiboot2 /isolinux/xen.gz $XEN_OPTS
-        echo    'Loading Linux ...'
-        module2  @KERNELPATH@ @ROOT@ @EXTRA@ rd.live.image ignore_loglevel intel_iommu=igfx_off log_buf_len=128M console=hvc0
-        echo    'Loading initial ramdisk ...'
-        module2  @INITRDPATH@
-}
-menuentry 'Start @PRODUCT@ @VERSION@' --class fedora --class gnu-linux --class gnu --class os {
-        linuxefi @KERNELPATH@ @ROOT@ @EXTRA@ rd.live.image
-        initrdefi @INITRDPATH@
-}
-menuentry 'Test this media & start @PRODUCT@ @VERSION@ with Xen hypervisor' --class fedora --class gnu-linux --class gnu --class os --class xen {
-        insmod multiboot2
-        echo    'Loading Xen ...'
-        multiboot2 /isolinux/xen.gz $XEN_OPTS
-        echo    'Loading Linux ...'
-        module2  @KERNELPATH@ @ROOT@ @EXTRA@ rd.live.image ignore_loglevel intel_iommu=igfx_off log_buf_len=128M console=hvc0 rd.live.check
-        echo    'Loading initial ramdisk ...'
-        module2  @INITRDPATH@
-}
-menuentry 'Test this media & start @PRODUCT@ @VERSION@' --class fedora --class gnu-linux --class gnu --class os {
-        linuxefi @KERNELPATH@ @ROOT@ @EXTRA@ rd.live.image rd.live.check
-        initrdefi @INITRDPATH@
-}
-submenu 'Troubleshooting -->' {
-	menuentry 'Start @PRODUCT@ @VERSION@ in basic graphics mode' --class fedora --class gnu-linux --class gnu --class os {
-                linuxefi @KERNELPATH@ @ROOT@ @EXTRA@ rd.live.image nomodeset
-                initrdefi @INITRDPATH@
-	}
-}
-__EOF__
-	EOD
-
-}
-
-# Create the build script.
-
-TYPE="live"
-
-# TODO Disk is WIP.
-#TYPE="disk"
-
-# TODO Make generic path
 # Create the bootstrap.ks file from the startup files.
-[ "$TYPE" = "live" ] && ./make-bootstrap-ks
+./make-bootstrap-ks
 
-mock -r $MOCKDIR --shell --isolation=simple <<-EOD
-	mkdir -p /$BUILD
-	chown -R 1000:1000 /$BUILD
-	EOD
-
-# Copy the kickstart files into mock.
-if [ "$TYPE" = "live" ]; then
-  mv -f bootstrap.ks $BASE/$BUILD
-  cp -a -f fedora-live-base.ks $BASE/$BUILD
-  cp -a fedora-live-workstation.ks $BASE/$BUILD
-else
-  cp -a -f fedora-disk-minimal.ks $BASE/$BUILD
-  cp -a -f fedora-disk-base.ks $BASE/$BUILD
-  cp -a -f fedora-minimal-common.ks $BASE/$BUILD
-fi
-
-# Set repo.
-mock -r $MOCKDIR --shell --isolation=simple <<-EOD
-	cd /$BUILD
-	cp /usr/share/spin-kickstarts/fedora-repo.ks .
-	cp /usr/share/spin-kickstarts/fedora-repo-rawhide.ks .
-	cp /usr/share/spin-kickstarts/fedora-repo-not-rawhide.ks .
-	if [ -n "\$(grep "# %include fedora-repo-not-rawhide.ks" fedora-repo.ks)" ]; then
-	  echo "Setting repo to not rawhide."
-	  cat >fedora-repo.ks <<-DOE
-		# For the master branch the following should be uncommented
-		# %include fedora-repo-rawhide.ks
-
-		# For non-master branches the following should be uncommented
-		%include fedora-repo-not-rawhide.ks
-		DOE
-	fi
-	EOD
-
-# Flatten the modified workstation kickstart in mock.
-if [ "$TYPE" = "live" ]; then
-  mock -r $MOCKDIR --shell --isolation=simple <<-EOD
-	cd /$BUILD
-	cp /usr/share/spin-kickstarts/fedora-workstation-common.ks .
-	ksflatten -c fedora-live-workstation.ks -o fedora-live-workstation-flat.ks
-	[ -n '$ROOT_PW' ] && sed -i 's:^rootpw.*:rootpw --iscrypted ${ROOT_PW}:' fedora-live-workstation-flat.ks
-	[ -n '$USER_PW' ] && sed -i '/^rootpw.*/a \
-	user --name=admin --password=$USER_PW --iscrypted --gecos="System Administrator"' fedora-live-workstation-flat.ks
-	EOD
-else
-  mock -r $MOCKDIR --shell --isolation=simple <<-EOD
-	cd /$BUILD
-	ksflatten -c fedora-disk-minimal.ks -o fedora-disk-minimal-flat.ks
-	EOD
-fi
-
-if [ "$TYPE" = "live" ]; then
-  # Overwrite the lorax templates with bootstrap versions.
-  update_lorax_files
-
-  TARGET="xen-bootstrap-iso-fedora"
-
-  # Do the diffs in mock.
-  mock -r $MOCKDIR --shell --isolation=simple <<-EOD
-	cd /$BUILD
-
-	echo >changes.diff
-
-	echo "fedora-live-workstation.ks:" >>changes.diff
-	diff /usr/share/spin-kickstarts/fedora-live-workstation.ks fedora-live-workstation.ks >>changes.diff || true
-	echo >>changes.diff
-
-	echo "fedora-live-base.ks:" >>changes.diff
-	diff /usr/share/spin-kickstarts/fedora-live-base.ks fedora-live-base.ks >>changes.diff || true
-	echo >>changes.diff
-
-	echo "x86.tmpl:" >>changes.diff
-	diff /usr/share/lorax/templates.d/99-generic/live/x86.tmpl share/lorax/templates.d/99-generic/live/x86.tmpl >>changes.diff || :
-	echo >>changes.diff
-
-	echo "isolinux.cfg:" >>changes.diff
-	diff /usr/share/lorax/templates.d/99-generic/live/config_files/x86/isolinux.cfg share/lorax/templates.d/99-generic/live/config_files/x86/isolinux.cfg >>changes.diff || :
-	echo >>changes.diff
-
-	echo "grub2-efi.cfg:" >>changes.diff
-	diff /usr/share/lorax/templates.d/99-generic/live/config_files/x86/grub2-efi.cfg share/lorax/templates.d/99-generic/live/config_files/x86/grub2-efi.cfg >>changes.diff || :
-	echo >>changes.diff
-
-	#echo "fedora-live-workstation-flat.ks:" >>changes.diff
-	#echo "" >>changes.diff
-	#cat fedora-live-workstation-flat.ks >>changes.diff
-
-	# Clean your room.
-	rm -f bootstrap.ks
-	rm -f fedora-live-base.ks
-	rm -f fedora-live-workstation.ks
-	rm -f fedora-repo.ks
-	rm -f fedora-repo-not-rawhide.ks
-	rm -f fedora-workstation-common.ks
-	chown 1000:1000 changes.diff
-	EOD
-else
-
-  TARGET="disk-minimal-fedora"
-
-  # Do the diffs in mock.
-  mock -r $MOCKDIR --shell --isolation=simple <<-EOD
-	cd /$BUILD
-
-	echo >changes.diff
-
-	echo "fedora-disk-minimal.ks:" >>changes.diff
-	diff /usr/share/spin-kickstarts/fedora-disk-minimal.ks fedora-disk-minimal.ks >>changes.diff || true
-	echo >>changes.diff
-
-	echo "fedora-disk-base.ks:" >>changes.diff
-	diff /usr/share/spin-kickstarts/fedora-disk-base.ks fedora-disk-base.ks >>changes.diff || true
-	echo >>changes.diff
-
-	echo "fedora-minimal-common.ks:" >>changes.diff
-	diff /usr/share/spin-kickstarts/fedora-minimal-common.ks fedora-minimal-common.ks >>changes.diff || true
-	echo >>changes.diff
-
-	# Clean your room.
-	## THIS WON'T WORK (kills -flat.ks): rm -f *.ks
-	chown 1000:1000 changes.diff
-	EOD
-fi
-
-mv $BASE/$BUILD/changes.diff $TARGET.diff
-
-#--project PROJECT        substituted for @PROJECT@ in bootloader config files
-#--releasever RELEASEVER  substituted for @VERSION@ in bootloader config files
-
-if [ "$TYPE" = "live" ]; then
-  mock -r $MOCKDIR --shell --isolation=simple <<-EOX
-# Create build script to be executed by mock.
-cat >/$BUILD/build.sh <<-__EOF__
+# Create the fsimage build script.
+cat >build-fsimage.sh <<-__EOF__
 	#!/bin/sh
 
 	cd /$BUILD
@@ -539,6 +69,9 @@ cat >/$BUILD/build.sh <<-__EOF__
 	mkdir -p tmp
 	mkdir -p logs/image
 	mkdir -p logs/iso
+
+	# This has been biting me lately.
+	rm -f /var/run/anaconda.pid
 
 	# Create the live file system image.
 	livemedia-creator --ks fedora-live-workstation-flat.ks \
@@ -571,7 +104,20 @@ cat >/$BUILD/build.sh <<-__EOF__
 	umount ./mnt
 	sleep 1s
 	rmdir ./mnt
+	
+	# Change the ownership of the image.
+	chown $USR:$GRP /$BUILD/image/livexen.img
+	__EOF__
 
+# Make the build script executable.
+chmod +x build-fsimage.sh
+
+# Create the iso build script to be executed by mock.
+cat >build-iso.sh <<-__EOF__
+	#!/bin/sh
+
+	cd /$BUILD
+	
 	# Create the live iso from the "enhanced" file system image.
 	livemedia-creator --ks fedora-live-workstation-flat.ks \
 	  --no-virt \
@@ -588,69 +134,121 @@ cat >/$BUILD/build.sh <<-__EOF__
 	  --nomacboot \
 	  --tmp=./tmp
 
-	chown -R 1000:1000 ./lmc
-	chown -R 1000:1000 ./logs
+	chown -R $USR:$GRP ./lmc
+	chown -R $USR:$GRP ./logs
 
 	rm -rf tmp
-
 	__EOF__
 
-	# Make the build script executable.
-	chmod +x /$BUILD/build.sh
-	EOX
-else
-  mock -r $MOCKDIR --shell --isolation=simple <<-EOX
-# Create build script to be executed by mock.
-cat >/$BUILD/build.sh <<-__EOF__
-	#!/bin/sh
-	set -xe
+# Make it executable.
+chmod +x build-iso.sh
 
+# Ensure the build directory is writable.  Use mock to avoid sudo.
+if ! touch /$BASE/$BUILD/write-test.txt 2>/dev/null ; then
+  mock -r $MOCKDIR --shell --isolation=simple <<-EOD
+  	# Create the build directory.
+	mkdir -p /$BUILD
+	# Make it writable.
+	chown -R $USR:$GRP /$BUILD
+	EOD
+fi
+
+# Move the build scripts into mock.
+mv build-fsimage.sh $BASE/$BUILD
+mv build-iso.sh $BASE/$BUILD
+
+# Copy the kickstart files into mock.
+mv -f    bootstrap.ks                $BASE/$BUILD
+cp -a -f fedora-live-base.ks         $BASE/$BUILD
+cp -a    fedora-live-workstation.ks  $BASE/$BUILD
+
+# Copy the modified templates into the build environment.
+cp -p x86.tmpl       $BASE/$BUILD/
+cp -p isolinux.cfg   $BASE/$BUILD/
+cp -p grub2-efi.cfg  $BASE/$BUILD/
+
+# Fixup the XEN_OPTS in the templates.
+sed -i "s/XEN_OPTS/$XEN_OPTS/" \
+  $BASE/$BUILD/grub2-efi.cfg
+
+sed -i "s/XEN_OPTS/$XEN_OPTS/" \
+  $BASE/$BUILD//isolinux.cfg
+
+# Do preliminary work in mock to avoid sudo.
+mock -r $MOCKDIR --shell --isolation=simple <<-EOX
 	cd /$BUILD
 
-	rm -rf tmp
-	rm -rf lmc
-	rm -rf image
-	rm -rf logs
-	mkdir -p tmp
-	mkdir -p logs/image
-	mkdir -p logs/iso
+	# Recreate the share directory in mock.
+	rm -rf share
 
-	# Create the live disk image.
-	livemedia-creator --ks fedora-disk-minimal-flat.ks \
-	  --no-virt \
-	  --lorax-templates=./share/lorax/templates.d/99-generic/ \
-	  --logfile=./logs/image/image.log \
-	  --resultdir=./image \
-	  --make-fsimage \
-	  --image-name=minimal.img \
-	  --fs-label=minimal \
-	  --tmp=./tmp || exit 1
+	# Copy the baseline lorax templates.
+	mkdir -p                   share
+	cp -a    /usr/share/lorax  share
+	chown -R $USR:$GRP         share
 
-	# Make updates to image.
+	# Move the modified templates to the build directories.
+	mv -f  x86.tmpl      share/lorax/templates.d/99-generic/live/
+	mv -f isolinux.cfg   share/lorax/templates.d/99-generic/live/config_files/x86/
+	mv -f grub2-efi.cfg  share/lorax/templates.d/99-generic/live/config_files/x86/
 
-	#rm -rf mnt
-	#mkdir mnt
-	#mount ./image/minimal.img ./mnt
+	# Fixup the repo, if needed.
+	cp /usr/share/spin-kickstarts/fedora-repo.ks .
+	cp /usr/share/spin-kickstarts/fedora-repo-rawhide.ks .
+	cp /usr/share/spin-kickstarts/fedora-repo-not-rawhide.ks .
+	if [ -n "\$(grep "[[:space:]]*%include.*fedora-repo-rawhide.ks" fedora-repo.ks)" ]; then
+	  echo "Setting repo to not rawhide."
+	  sed -i "s/[[:space:]]*%include/# %include/" fedora-repo.ks
+	  sed -i "s/#.*fedora-repo-not-rawhide.ks/%include fedora-repo-not-rawhide.ks/" fedora-repo.ks
+	fi
 
-	# Reset default target to multi-user.  Use 'systemctl isolate graphical.target' to enable gui.
-	##rm -f ./mnt/etc/systemd/system/default.target
-	##ln -s /lib/systemd/system/multi-user.target ./mnt/etc/systemd/system/default.target
+	# Flatten the kickstart file.
+	cp /usr/share/spin-kickstarts/fedora-workstation-common.ks .
+	ksflatten -c fedora-live-workstation.ks -o fedora-live-workstation-flat.ks
 
-	#umount ./mnt
-	#sleep 1s
-	#rmdir ./mnt
+	# Set the passwords.
+	# TODO This EXPOSES the encryped passwords.  No passwords?
+	[ -n '$ROOT_PW' ] && sed -i 's:^rootpw.*:rootpw --iscrypted ${ROOT_PW}:' fedora-live-workstation-flat.ks
+	[ -n '$USER_PW' ] && sed -i '/^rootpw.*/a \
+	user --name=admin --password=$USER_PW --iscrypted --gecos="System Administrator"' fedora-live-workstation-flat.ks
 
-	chown -R 1000:1000 ./lmc
-	chown -R 1000:1000 ./logs
+	# Do the diffs.
+	echo >changes.diff
 
-	rm -rf tmp
+	echo "fedora-live-workstation.ks:" >>changes.diff
+	diff -w /usr/share/spin-kickstarts/fedora-live-workstation.ks fedora-live-workstation.ks >>changes.diff || true
+	echo >>changes.diff
 
-	__EOF__
+	echo "fedora-live-base.ks:" >>changes.diff
+	diff -w /usr/share/spin-kickstarts/fedora-live-base.ks fedora-live-base.ks >>changes.diff || true
+	echo >>changes.diff
 
-	# Make the build script executable.
-	chmod +x /$BUILD/build.sh
+	echo "x86.tmpl:" >>changes.diff
+	diff -w /usr/share/lorax/templates.d/99-generic/live/x86.tmpl share/lorax/templates.d/99-generic/live/x86.tmpl >>changes.diff || :
+	echo >>changes.diff
+
+	echo "isolinux.cfg:" >>changes.diff
+	diff -w /usr/share/lorax/templates.d/99-generic/live/config_files/x86/isolinux.cfg share/lorax/templates.d/99-generic/live/config_files/x86/isolinux.cfg >>changes.diff || :
+	echo >>changes.diff
+
+	echo "grub2-efi.cfg:" >>changes.diff
+	diff -w /usr/share/lorax/templates.d/99-generic/live/config_files/x86/grub2-efi.cfg share/lorax/templates.d/99-generic/live/config_files/x86/grub2-efi.cfg >>changes.diff || :
+	echo >>changes.diff
+
+	# Clean your room.
+	rm -f bootstrap.ks
+	rm -f fedora-live-base.ks
+	rm -f fedora-live-workstation.ks
+	rm -f fedora-repo.ks
+	rm -f fedora-repo-not-rawhide.ks
+	rm -f fedora-workstation-common.ks
+	chown $USR:$GRP changes.diff
 	EOX
-fi
+
+# Get the diiferences from the mock environment.
+mv $BASE/$BUILD/changes.diff xen-bootstrap-iso-fedora.diff
+
+#--project PROJECT        substituted for @PROJECT@ in bootloader config files
+#--releasever RELEASEVER  substituted for @VERSION@ in bootloader config files
 
 # Quit now if only doing difference listing.
 [ "$1" = "diff" ] && diff="true"
@@ -658,24 +256,21 @@ fi
 
 if [ -z "$diff" ]; then
 
-  # Run build in mock environment.
-  time mock -r $MOCKDIR --shell --isolation=simple \
-    /$BUILD/build.sh
+  # Build the file system image in mock.
+  time mock -r $MOCKDIR --shell --isolation=simple --enable-network \
+    /$BUILD/build-fsimage.sh
+
+  # Build the iso in mock.
+  time mock -r $MOCKDIR --shell --isolation=simple --enable-network \
+    /$BUILD/build-iso.sh
 
   # Get the iso image from the mock environment.
   mv -f $BASE/$BUILD/lmc/*.iso .
 
-  # Move the log files.
+  # Get the log files.
   rm -rf logs
   mv $BASE/$BUILD/logs .
 
-  # Delete the multi-gigabyte livexen image file.
-  mock -r $MOCKDIR --shell --isolation=simple <<-EOD
-	if [ -e /$BUILD/image/livexen.img ]; then
-	  echo "Removing old image."
-	  rm -f /$BUILD/image/livexen.img
-	fi
-	EOD
 fi
 
 echo "Done!"

@@ -10,7 +10,7 @@
 lang en_US.UTF-8
 keyboard us
 timezone US/Central
-auth --useshadow --passalgo=sha512
+authselect --useshadow --passalgo sha512
 selinux --permissive
 firewall --enabled --service=mdns
 xconfig --startxonboot
@@ -94,13 +94,7 @@ for arg in \`cat /proc/cmdline\` ; do
   fi
 done
 
-# enable swaps unless requested otherwise
-swaps=\`blkid -t TYPE=swap -o device\`
-if ! strstr "\`cat /proc/cmdline\`" noswap && [ -n "\$swaps" ] ; then
-  for s in \$swaps ; do
-    action "Enabling swap partition \$s" swapon \$s
-  done
-fi
+# enable swapfile if it exists
 if ! strstr "\`cat /proc/cmdline\`" noswap && [ -f /run/initramfs/live/\${livedir}/swap.img ] ; then
   action "Enabling swap file" swapon /run/initramfs/live/\${livedir}/swap.img
 fi
@@ -206,7 +200,7 @@ touch /.liveimg-configured
 # https://bugzilla.redhat.com/show_bug.cgi?id=679486
 # the hostname must be something else than 'localhost'
 # https://bugzilla.redhat.com/show_bug.cgi?id=1370222
-echo "localhost-live" > /etc/hostname
+hostnamectl set-hostname "localhost-live"
 
 EOF
 
@@ -290,7 +284,7 @@ releasever=$(rpm -q --qf '%{version}\n' --whatprovides system-release)
 basearch=$(uname -i)
 rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-$releasever-$basearch
 echo "Packages within this LiveCD"
-rpm -qa
+rpm -qa --qf '%{size}\t%{name}-%{version}-%{release}.%{arch}\n' |sort -rn
 # Note that running rpm recreates the rpm db files which aren't needed or wanted
 rm -f /var/lib/rpm/__db*
 
@@ -325,13 +319,15 @@ touch /etc/machine-id
 
 
 %post --nochroot
-cp $INSTALL_ROOT/usr/share/licenses/*-release/* $LIVE_ROOT/
+# For livecd-creator builds only (lorax/livemedia-creator handles this directly)
+if [ -n "$LIVE_ROOT" ]; then
+    cp "$INSTALL_ROOT"/usr/share/licenses/*-release-common/* "$LIVE_ROOT/"
 
-# only works on x86, x86_64
-if [ "$(uname -i)" = "i386" -o "$(uname -i)" = "x86_64" ]; then
-    # For livecd-creator builds
-    if [ ! -d $LIVE_ROOT/LiveOS ]; then mkdir -p $LIVE_ROOT/LiveOS ; fi
-    cp /usr/bin/livecd-iso-to-disk $LIVE_ROOT/LiveOS
+    # only installed on x86, x86_64
+    if [ -f /usr/bin/livecd-iso-to-disk ]; then
+        mkdir -p "$LIVE_ROOT/LiveOS"
+        cp /usr/bin/livecd-iso-to-disk "$LIVE_ROOT/LiveOS"
+    fi
 fi
 
 %end

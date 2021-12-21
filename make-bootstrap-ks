@@ -38,6 +38,14 @@ cat >>bootstrap.ks <<-'__EOF__'
 	# Secure the sshd daemon.
 	/usr/local/bin/secure-sshd            | tee -a /var/log/bootstrap-install.log
 
+	# Disable the zram-generator.
+	echo "Disabling the zram-generator."         >>/var/log/bootstrap-install.log
+	touch /etc/systemd/zram-generator.conf
+
+	# Disable the avahi-daemon.
+	systemctl disable avahi-daemon.socket        >>/var/log/bootstrap-install.log
+	systemctl disable avahi-daemon.service       >>/var/log/bootstrap-install.log
+
 	# Enable and start the bootstrap service.
 	/usr/bin/systemctl enable bootstrap.service  >>/var/log/bootstrap-install.log
 	/usr/bin/systemctl start  bootstrap.service  >>/var/log/bootstrap-install.log
