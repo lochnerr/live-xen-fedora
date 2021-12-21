@@ -1,4 +1,5 @@
 logs/
-xen-bootstrap-iso-fedora.diff
-Fedora-Bootstrap-Live-x86_64-31.iso
+xen-bootstrap-iso-fedora.diff*
+Fedora-Bootstrap-Live-x86_64-*.iso
+set-pass
 
