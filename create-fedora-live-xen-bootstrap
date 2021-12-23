@@ -48,11 +48,6 @@ if [ -e ./set-pass ]; then
   . ./set-pass
 fi
 
-if [ -z "$USER_PW" ]; then
-  echo "Error: USER_PW environment variable not set!"
-  exit 1
-fi
-
 # Create the bootstrap.ks file from the startup files.
 ./make-bootstrap-ks
 
@@ -144,7 +139,9 @@ cat >build-iso.sh <<-__EOF__
 chmod +x build-iso.sh
 
 # Ensure the build directory is writable.  Use mock to avoid sudo.
-if ! touch /$BASE/$BUILD/write-test.txt 2>/dev/null ; then
+if touch /$BASE/$BUILD/write-test 2>/dev/null ; then
+  rm /$BASE/$BUILD/write-test
+else
   mock -r $MOCKDIR --shell --isolation=simple <<-EOD
   	# Create the build directory.
 	mkdir -p /$BUILD
@@ -187,7 +184,7 @@ mock -r $MOCKDIR --shell --isolation=simple <<-EOX
 	chown -R $USR:$GRP         share
 
 	# Move the modified templates to the build directories.
-	mv -f  x86.tmpl      share/lorax/templates.d/99-generic/live/
+	mv -f x86.tmpl       share/lorax/templates.d/99-generic/live/
 	mv -f isolinux.cfg   share/lorax/templates.d/99-generic/live/config_files/x86/
 	mv -f grub2-efi.cfg  share/lorax/templates.d/99-generic/live/config_files/x86/
 
@@ -205,9 +202,7 @@ mock -r $MOCKDIR --shell --isolation=simple <<-EOX
 	cp /usr/share/spin-kickstarts/fedora-workstation-common.ks .
 	ksflatten -c fedora-live-workstation.ks -o fedora-live-workstation-flat.ks
 
-	# Set the passwords.
-	# TODO This EXPOSES the encryped passwords.  No passwords?
-	[ -n '$ROOT_PW' ] && sed -i 's:^rootpw.*:rootpw --iscrypted ${ROOT_PW}:' fedora-live-workstation-flat.ks
+	# Set the user password.
 	[ -n '$USER_PW' ] && sed -i '/^rootpw.*/a \
 	user --name=admin --password=$USER_PW --iscrypted --gecos="System Administrator"' fedora-live-workstation-flat.ks
 
@@ -246,9 +241,6 @@ mock -r $MOCKDIR --shell --isolation=simple <<-EOX
 
 # Get the diiferences from the mock environment.
 mv $BASE/$BUILD/changes.diff xen-bootstrap-iso-fedora.diff
-
-#--project PROJECT        substituted for @PROJECT@ in bootloader config files
-#--releasever RELEASEVER  substituted for @VERSION@ in bootloader config files
 
 # Quit now if only doing difference listing.
 [ "$1" = "diff" ] && diff="true"
