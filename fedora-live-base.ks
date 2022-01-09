@@ -10,7 +10,6 @@
 lang en_US.UTF-8
 keyboard us
 timezone US/Central
-authselect --useshadow --passalgo sha512
 selinux --permissive
 firewall --enabled --service=mdns
 xconfig --startxonboot
@@ -24,17 +23,6 @@ shutdown
 %include fedora-repo.ks
 
 %packages
-@base-x
-@guest-desktop-agents
-@standard
-@core
-@fonts
-@input-methods
-@dial-up
-@multimedia
-@hardware-support
-@printing
-
 # Explicitly specified here:
 # <notting> walters: because otherwise dependency loops cause yum issues.
 kernel
@@ -44,7 +32,8 @@ kernel-modules-extra
 # This was added a while ago, I think it falls into the category of
 # "Diagnosis/recovery tool useful from a Live OS image".  Leaving this untouched
 # for now.
-memtest86+
+#memtest86+
+@x86-baremetal-tools # memtest86+ is included
 
 # Need aajohan-comfortaa-fonts for the SVG rnotes images
 aajohan-comfortaa-fonts
@@ -52,7 +41,11 @@ aajohan-comfortaa-fonts
 # Without this, initramfs generation during live image creation fails: #1242586
 dracut-live
 grub2-efi
-syslinux
+# syslinux is in @x86-baremetal-tools
+
+# no longer in @core since 2018-10, but needed for livesys script
+initscripts
+chkconfig
 %end
 
 %post
@@ -280,9 +273,6 @@ EOF
 
 # work around for poor key import UI in PackageKit
 rm -f /var/lib/rpm/__db*
-releasever=$(rpm -q --qf '%{version}\n' --whatprovides system-release)
-basearch=$(uname -i)
-rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-$releasever-$basearch
 echo "Packages within this LiveCD"
 rpm -qa --qf '%{size}\t%{name}-%{version}-%{release}.%{arch}\n' |sort -rn
 # Note that running rpm recreates the rpm db files which aren't needed or wanted
