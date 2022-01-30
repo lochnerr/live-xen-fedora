@@ -42,7 +42,6 @@ install ${configdir}/isolinux.cfg ${BOOTDIR}
 install ${configdir}/boot.msg ${BOOTDIR}
 install ${configdir}/grub.conf ${BOOTDIR}
 install usr/share/anaconda/boot/syslinux-splash.png ${BOOTDIR}/splash.png
-install boot/memtest* ${BOOTDIR}/memtest
 
 ## configure bootloader
 replace @VERSION@ ${product.version} ${BOOTDIR}/grub.conf ${BOOTDIR}/isolinux.cfg ${BOOTDIR}/*.msg
@@ -120,6 +119,7 @@ hardlink ${KERNELDIR}/initrd.img ${BOOTDIR}
     install ${f} ${LIVEDIR}/${f|basename}
 %endif
 
+# This is needed to get the grub multiboot2 module which is necessary to load xen.
 mkdir EFI/BOOT/x86_64-efi
 install usr/lib/grub/x86_64-efi/* EFI/BOOT/x86_64-efi
 
