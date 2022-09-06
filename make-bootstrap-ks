@@ -31,6 +31,7 @@ add_file_stanza $STARTUP/bootstrap.service        /usr/lib/systemd/system  0744
 add_file_stanza $STARTUP/bin/bootstrap-shutdown   /usr/local/bin  0755
 add_file_stanza $STARTUP/bin/bootstrap-startup    /usr/local/bin  0755
 add_file_stanza $STARTUP/bin/secure-sshd          /usr/local/bin  0755
+add_file_stanza $STARTUP/bin/enable-authenticator-if-needed    /usr/local/bin  0755
 
 cat >>bootstrap.ks <<-'__EOF__'
 	/usr/bin/rm b64

@@ -26,7 +26,7 @@ XEN_OPTS="dom0_mem=4096M,max:8192M dom0_max_vcpus=2 dom0_vcpus_pin=true loglvl=a
 XEN_OPTS="dom0=pvh $XEN_OPTS"
 
 [ "$1" != "diff" ] && [ -z "$RELEASE" ] && RELEASE="$1"
-RELEASE="${RELEASE:-35}"
+RELEASE="${RELEASE:-$VERSION_ID}"
 echo "Release is ${RELEASE}."
 
 MOCKDIR="fedora-${RELEASE}-x86_64"
@@ -86,11 +86,20 @@ cat >build-fsimage.sh <<-__EOF__
 	mkdir mnt
 	mount ./image/livexen.img ./mnt
 	cat >>./mnt/etc/sysconfig/xencommons <<-EOD
-	
 	# Enable xenstore domain.
 	XENSTORETYPE=domain
 	XENSTORE_MAX_DOMAIN_SIZE=8:1/128
 	EOD
+
+	# Create generic xen.gz symbolic link to xen image executable.
+	# Starting with Fedora 36, xen package no longer sets default xen symlink.
+	if [ ! -L ./mnt/boot/xen.gz ]; then
+	  xenimg="\$(ls ./mnt/boot/xen-*.gz | cut -d '/' -f 4)"
+	  ln -sf \$xenimg  ./mnt/boot/xen.gz
+	  echo "Xen image is: \${xenimg}."
+	fi
+	echo "Default xen link is:"
+	ls -l ./mnt/boot/xen.gz
 	
 	# Reset default target to multi-user.  Use 'systemctl isolate graphical.target' to enable gui.
 	rm -f ./mnt/etc/systemd/system/default.target
@@ -112,6 +121,13 @@ cat >build-iso.sh <<-__EOF__
 	#!/bin/sh
 
 	cd /$BUILD
+
+	# Delete the results directory in case stage 2 failed previously.
+	rm -rf ./lmc
+
+	# Empty the tmp directory.
+	rm -rf tmp
+	mkdir -p tmp
 	
 	# Create the live iso from the "enhanced" file system image.
 	livemedia-creator --ks fedora-live-workstation-flat.ks \
@@ -169,7 +185,7 @@ sed -i "s/XEN_OPTS/$XEN_OPTS/" \
   $BASE/$BUILD/grub2-efi.cfg
 
 sed -i "s/XEN_OPTS/$XEN_OPTS/" \
-  $BASE/$BUILD//isolinux.cfg
+  $BASE/$BUILD/isolinux.cfg
 
 # Do preliminary work in mock to avoid sudo.
 mock -r $MOCKDIR --shell --isolation=simple <<-EOX
@@ -248,9 +264,15 @@ mv $BASE/$BUILD/changes.diff xen-bootstrap-iso-fedora.diff
 
 if [ -z "$diff" ]; then
 
-  # Build the file system image in mock.
-  time mock -r $MOCKDIR --shell --isolation=simple --enable-network \
-    /$BUILD/build-fsimage.sh
+  [ "$1" = "stage2" ] && s2="true"
+  [ "$2" = "stage2" ] && s2="true"
+  [ "$3" = "stage2" ] && s2="true"
+
+  if [ -z "$s2" ]; then
+    # Build the file system image in mock.
+    time mock -r $MOCKDIR --shell --isolation=simple --enable-network \
+      /$BUILD/build-fsimage.sh
+  fi
 
   # Build the iso in mock.
   time mock -r $MOCKDIR --shell --isolation=simple --enable-network \
@@ -262,6 +284,9 @@ if [ -z "$diff" ]; then
   # Get the log files.
   rm -rf logs
   mv $BASE/$BUILD/logs .
+
+  # Relink the default image.
+  ln -sf ~/git/live-xen-fedora/Fedora-Bootstrap-Live-x86_64-${RELEASE}.iso ~/Fedora-Bootstrap-Live-x86_64.iso
 
 fi
 

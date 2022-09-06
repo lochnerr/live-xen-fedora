@@ -40,7 +40,6 @@ aajohan-comfortaa-fonts
 
 # Without this, initramfs generation during live image creation fails: #1242586
 dracut-live
-grub2-efi
 # syslinux is in @x86-baremetal-tools
 
 # no longer in @core since 2018-10, but needed for livesys script
