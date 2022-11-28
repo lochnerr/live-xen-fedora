@@ -25,7 +25,7 @@ XEN_OPTS="dom0_mem=4096M,max:8192M dom0_max_vcpus=2 dom0_vcpus_pin=true loglvl=a
 # Note: PVH dom0 will not run on KVM.  It does run on bare metal with i/o virtualization.
 XEN_OPTS="dom0=pvh $XEN_OPTS"
 
-[ "$1" != "diff" ] && [ -z "$RELEASE" ] && RELEASE="$1"
+[ "$1" != "diff" ] && [ "$1" != "stage2" ] && [ -z "$RELEASE" ] && RELEASE="$1"
 RELEASE="${RELEASE:-$VERSION_ID}"
 echo "Release is ${RELEASE}."
 
@@ -177,7 +177,10 @@ cp -a    fedora-live-workstation.ks  $BASE/$BUILD
 
 # Copy the modified templates into the build environment.
 cp -p x86.tmpl       $BASE/$BUILD/
-cp -p isolinux.cfg   $BASE/$BUILD/
+# The bios boot loader was changed from syslinux to grub2 in release 37.
+boot_config="grub2-bios.cfg"
+[ "${RELEASE}" < "37" ] && boot_config="isolinux.cfg"
+cp -p ${boot_config} $BASE/$BUILD/
 cp -p grub2-efi.cfg  $BASE/$BUILD/
 
 # Fixup the XEN_OPTS in the templates.
@@ -185,7 +188,7 @@ sed -i "s/XEN_OPTS/$XEN_OPTS/" \
   $BASE/$BUILD/grub2-efi.cfg
 
 sed -i "s/XEN_OPTS/$XEN_OPTS/" \
-  $BASE/$BUILD/isolinux.cfg
+  $BASE/$BUILD/$boot_config
 
 # Do preliminary work in mock to avoid sudo.
 mock -r $MOCKDIR --shell --isolation=simple <<-EOX
@@ -201,7 +204,7 @@ mock -r $MOCKDIR --shell --isolation=simple <<-EOX
 
 	# Move the modified templates to the build directories.
 	mv -f x86.tmpl       share/lorax/templates.d/99-generic/live/
-	mv -f isolinux.cfg   share/lorax/templates.d/99-generic/live/config_files/x86/
+	mv -f ${boot_config} share/lorax/templates.d/99-generic/live/config_files/x86/
 	mv -f grub2-efi.cfg  share/lorax/templates.d/99-generic/live/config_files/x86/
 
 	# Fixup the repo, if needed.
@@ -212,6 +215,10 @@ mock -r $MOCKDIR --shell --isolation=simple <<-EOX
 	  echo "Setting repo to not rawhide."
 	  sed -i "s/[[:space:]]*%include/# %include/" fedora-repo.ks
 	  sed -i "s/#.*fedora-repo-not-rawhide.ks/%include fedora-repo-not-rawhide.ks/" fedora-repo.ks
+	fi
+	if [ "${RELEASE}" > "36" ]; then
+	  # Release 37+ no longer contains the x86-baremetal-tools group.
+	  sed -i "/^@x86-baremetal-tools/#@x86-baremetal-tools/" fedora-live-base.ks
 	fi
 
 	# Flatten the kickstart file.
@@ -237,8 +244,8 @@ mock -r $MOCKDIR --shell --isolation=simple <<-EOX
 	diff -w /usr/share/lorax/templates.d/99-generic/live/x86.tmpl share/lorax/templates.d/99-generic/live/x86.tmpl >>changes.diff || :
 	echo >>changes.diff
 
-	echo "isolinux.cfg:" >>changes.diff
-	diff -w /usr/share/lorax/templates.d/99-generic/live/config_files/x86/isolinux.cfg share/lorax/templates.d/99-generic/live/config_files/x86/isolinux.cfg >>changes.diff || :
+	echo "${boot_config}:" >>changes.diff
+	diff -w /usr/share/lorax/templates.d/99-generic/live/config_files/x86/${boot_config} share/lorax/templates.d/99-generic/live/config_files/x86/${boot_config} >>changes.diff || :
 	echo >>changes.diff
 
 	echo "grub2-efi.cfg:" >>changes.diff
