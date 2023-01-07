@@ -79,6 +79,7 @@ hardlink ${KERNELDIR}/initrd.img ${BOOTDIR}
 %if (efiarch32 or efiarch64) and basearch != 'i386':
     <%
     efigraft="EFI/BOOT={0}/EFI/BOOT".format(outroot)
+    efigraft += " boot/grub2={0}/boot/grub2".format(outroot)
     images = [("images/efiboot.img", "-isohybrid-gpt-basdat")]
     if domacboot:
         images.append(("images/macboot.img", "-isohybrid-gpt-hfsplus"))
@@ -119,9 +120,7 @@ hardlink ${KERNELDIR}/initrd.img ${BOOTDIR}
     install ${f} ${LIVEDIR}/${f|basename}
 %endif
 
-# This is needed to get the grub multiboot2 module which is necessary to load xen.
-mkdir EFI/BOOT/x86_64-efi
-install usr/lib/grub/x86_64-efi/* EFI/BOOT/x86_64-efi
+# EFI booting of Xen no longer works due to lack of multiboot2 support.
 
 ## make boot.iso
 runcmd xorrisofs ${isoargs} -o ${outroot}/images/boot.iso \

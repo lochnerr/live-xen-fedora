@@ -11,6 +11,11 @@
 
 set -e
 
+# Note: As of November 2022 (Fedora Release 37) this script is capable of building images for release 36 and 37.
+# Both releases will run with Xen in KVM with bios booting.  Neither will run with EFI because there is no
+# multiboot2 support.  Also, SuperMicro bios does not recognize release 37 images because the disk label has been
+# changed to gpt.
+
 # Verify that the Fedora mock configuration is the same as the running o/s.
 # The symbolic link '/etc/mock/default.cfg' does not get updated after a system upgrade.
 . /etc/os-release
@@ -176,12 +181,17 @@ cp -a -f fedora-live-base.ks         $BASE/$BUILD
 cp -a    fedora-live-workstation.ks  $BASE/$BUILD
 
 # Copy the modified templates into the build environment.
-cp -p x86.tmpl       $BASE/$BUILD/
-# The bios boot loader was changed from syslinux to grub2 in release 37.
-boot_config="grub2-bios.cfg"
-[ "${RELEASE}" < "37" ] && boot_config="isolinux.cfg"
-cp -p ${boot_config} $BASE/$BUILD/
+x86tmpl="x86-pre-37.tmpl"
+[[ "${RELEASE}" > "36" ]] && x86tmpl="x86.tmpl"
+cp -p $x86tmpl       $BASE/$BUILD/x86.tmpl
 cp -p grub2-efi.cfg  $BASE/$BUILD/
+# The bios boot loader was changed from syslinux to grub2 in release 37.
+boot_config="isolinux.cfg"
+if [[ "${RELEASE}" > "36" ]]; then
+  boot_config="grub2-bios.cfg"
+  sed -i 's@/isolinux/xen.gz@/images/pxeboot/xen.gz@' $BASE/$BUILD/grub2-efi.cfg
+fi
+cp -p ${boot_config} $BASE/$BUILD/
 
 # Fixup the XEN_OPTS in the templates.
 sed -i "s/XEN_OPTS/$XEN_OPTS/" \
@@ -216,9 +226,12 @@ mock -r $MOCKDIR --shell --isolation=simple <<-EOX
 	  sed -i "s/[[:space:]]*%include/# %include/" fedora-repo.ks
 	  sed -i "s/#.*fedora-repo-not-rawhide.ks/%include fedora-repo-not-rawhide.ks/" fedora-repo.ks
 	fi
-	if [ "${RELEASE}" > "36" ]; then
+	if [[ "${RELEASE}" > "36" ]]; then
 	  # Release 37+ no longer contains the x86-baremetal-tools group.
-	  sed -i "/^@x86-baremetal-tools/#@x86-baremetal-tools/" fedora-live-base.ks
+	  echo "Removing the x86-baremetal-tools group."
+	  sed -i "s/^@x86-baremetal-tools/#@x86-baremetal-tools/" fedora-live-base.ks
+	else
+	  echo "Not removing the x86-baremetal-tools group."
 	fi
 
 	# Flatten the kickstart file.
